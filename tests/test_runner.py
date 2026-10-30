@@ -7,21 +7,21 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from agentic_ml_loop.final_evaluation import evaluate_final, freeze_candidate
-from agentic_ml_loop.results import load_results
-from agentic_ml_loop.run_evidence import RunEvidence, run_evidence_staleness
-from agentic_ml_loop.runner import ExperimentSeed, init_experiment_dir, save_candidate_result
-from agentic_ml_loop.splits import SearchSplits
+from model_finder.final_evaluation import evaluate_final, freeze_candidate
+from model_finder.results import load_results
+from model_finder.run_evidence import RunEvidence, run_evidence_staleness
+from model_finder.runner import ExperimentSeed, init_experiment_dir, save_candidate_result
+from model_finder.splits import SearchSplits
 from tests.conftest import fitted
 
 
 def test_missing_experiment_is_reported(tmp_path: Path, code_root: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="Experiment directory"):
+    with pytest.raises(FileNotFoundError, match="experiment directory"):
         save_candidate_result(tmp_path / "missing", "a", {"a": fitted}, code_root)
 
 
 def test_unknown_candidate_is_reported_before_loading_data(tmp_path: Path, code_root: Path) -> None:
-    with pytest.raises(ValueError, match="Unknown candidate 'b'"):
+    with pytest.raises(ValueError, match="unknown candidate b"):
         save_candidate_result(tmp_path, "b", {"a": fitted}, code_root)
 
 
@@ -66,19 +66,19 @@ def test_rerun_replaces_the_entry_and_keeps_old_evidence(scored: Path, code_root
 
 def test_candidate_id_must_match_the_request(sealed: Path, code_root: Path) -> None:
     runners = {"candidate-a": lambda splits: fitted(splits, "other")}
-    with pytest.raises(ValueError, match="does not match requested"):
+    with pytest.raises(ValueError, match="returned id"):
         save_candidate_result(sealed, "candidate-a", runners, code_root)
 
 
 def test_objective_must_match_the_specification(sealed: Path, code_root: Path) -> None:
     (sealed / "experiment.md").write_text("## Objective Metric\n\n(val_r2)\n")
-    with pytest.raises(ValueError, match="objective_metric does not match"):
+    with pytest.raises(ValueError, match="the objective is"):
         save_candidate_result(sealed, "candidate-a", {"candidate-a": fitted}, code_root)
 
 
 def test_direction_must_match_the_specification(sealed: Path, code_root: Path) -> None:
     (sealed / "experiment.md").write_text("objective_direction: minimize\n")
-    with pytest.raises(ValueError, match="objective_direction does not match"):
+    with pytest.raises(ValueError, match="the direction is"):
         save_candidate_result(sealed, "candidate-a", {"candidate-a": fitted}, code_root)
 
 
@@ -87,7 +87,7 @@ def test_candidate_that_mutates_search_rows_is_rejected(sealed: Path, code_root:
         splits.train.loc[0, "signal"] = 999.0
         return fitted(splits)
 
-    with pytest.raises(ValueError, match="modified the search data"):
+    with pytest.raises(ValueError, match="changed the search rows"):
         save_candidate_result(sealed, "candidate-a", {"candidate-a": mutating}, code_root)
 
 

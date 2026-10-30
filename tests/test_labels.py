@@ -3,19 +3,16 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import duckdb
 import pandas as pd
 import pytest
 
-from agentic_ml_loop.candidate_result import CandidateResult, SearchMetrics
-from agentic_ml_loop.cli.main import main
-from agentic_ml_loop.cli.runner import RunnerConfig, run_runner_main
-from agentic_ml_loop.runner import ExperimentSeed
-from tests.conftest import SPEC, fitted, rows
+from model_finder.cli.main import main
+from model_finder.cli.runner import RunnerConfig, run_runner_main
+from model_finder.runner import ExperimentSeed
+from tests.conftest import SPEC, candidate_result, fitted, rows
 from tests.test_usable_defaults import _quick
 
 
@@ -187,13 +184,10 @@ def test_final_after_a_reseal_lists_its_exploratory_reason(
 def test_a_hyperparameter_naming_a_holdout_score_warns(
     config: RunnerConfig, tmp_path: Path, capsys
 ) -> None:
-    from agentic_ml_loop.validation import hyperparameter_warnings
+    from model_finder.validation import hyperparameter_warnings
 
-    result = CandidateResult(
-        candidate_id="c",
-        objective_metric="val_auc",
-        objective_score=0.5,
-        metrics=SearchMetrics(validation={"auc": 0.5}),
+    result = candidate_result(
+        "c",
         hyperparameters={"holdout_auc": 0.91, "nested": {"test_auc": 0.9}, "test_size": 0.2},
     )
     assert len(hyperparameter_warnings([result])) == 2
@@ -227,24 +221,3 @@ def test_rebuild_restores_a_missing_leaderboard_without_a_flag(
     results.unlink()
     assert main(["rebuild-results", str(experiment)]) == 0
     assert results.read_text() == recorded
-
-
-def test_readme_csv_recipe_reaches_a_leaderboard(tmp_path: Path, monkeypatch, capsys) -> None:
-    readme = (Path(__file__).parents[1] / "README.md").read_text()
-    recipe = readme.split("## Use your own CSV")[1].split("```python\n")[1].split("```")[0]
-    package = tmp_path / "my_model"
-    package.mkdir()
-    (package / "run.py").write_text(recipe)
-    monkeypatch.chdir(tmp_path)
-    rows(count=60).assign(x=lambda frame: frame["signal"]).to_csv("rows.csv", index=False)
-    run = [sys.executable, "my_model/run.py"]
-    experiment = ["--experiment", "experiments/my_run"]
-    for arguments in (
-        ["init-demo", *experiment, "--no-holdout"],
-        ["run-candidate", *experiment, "--candidate", "logreg"],
-    ):
-        subprocess.run([*run, *arguments], check=True, capture_output=True)
-    assert main(["leaderboard", "experiments/my_run"]) == 0
-    out = capsys.readouterr().out
-    assert "logreg" in out
-    assert "Exploratory: no holdout" in out

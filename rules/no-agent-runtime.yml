@@ -1,11 +1,11 @@
 id: no-agent-runtime
 language: python
 severity: error
-message: The native goal runs the agent. Ruff TID251 bans the imports; this catches dynamic ones.
+message: "The native goal runs the agent, so code must not start one. Fix: remove this dynamic import."
 files:
   - src/**/*.py
   - demos/**/*.py
-  - experiments/*/scripts/**/*.py
+  - experiments/**/*.py
 rule:
   any:
     - pattern: __import__($$$)

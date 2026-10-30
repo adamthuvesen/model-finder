@@ -14,13 +14,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
 from xgboost import XGBRegressor
 
-from agentic_ml_loop.candidate_result import CandidateRunner, FittedCandidate
-from agentic_ml_loop.splits import SearchSplits
 from demos.common import (
     RANDOM_STATE,
-    DemoCandidate,
-    DemoScoring,
-    fitted_candidate,
     regression_metrics,
 )
 from demos.demo_regression.data import (
@@ -32,10 +27,13 @@ from demos.demo_regression.data import (
     base_feature_columns,
     engineered_feature_columns,
 )
+from model_finder.candidate_result import CandidateRunner, FittedCandidate
+from model_finder.candidates import Scoring, scored_candidate
+from model_finder.splits import SearchSplits
 
 logger = logging.getLogger(__name__)
 
-SCORING = DemoScoring(TARGET_COLUMN, "val_r2", regression_metrics)
+SCORING = Scoring(TARGET_COLUMN, "val_r2", regression_metrics)
 
 
 @dataclass(frozen=True)
@@ -119,14 +117,15 @@ def _xgb_preprocessor(feature_set: str) -> ColumnTransformer:
     )
 
 
-def _demo_candidate(spec: RegressionModelSpec, selected_features: list[str]) -> DemoCandidate:
-    return DemoCandidate(
+def _demo_candidate(spec: RegressionModelSpec, selected_features: list[str]) -> dict[str, Any]:
+    return dict(
         candidate_id=spec.candidate_id,
         model_family=spec.model_family,
         feature_set=spec.feature_set,
         notes=spec.notes,
         hyperparameters=spec.hyperparameters,
         selected_features=selected_features,
+        random_seed=RANDOM_STATE,
     )
 
 
@@ -147,11 +146,11 @@ def _fit_log_transform_model(spec: RegressionModelSpec, splits: SearchSplits) ->
         inverse_func=np.expm1,
     )
     wrapped.fit(splits.train[selected_features], splits.train[TARGET_COLUMN])
-    return fitted_candidate(
+    return scored_candidate(
         splits,
         SCORING,
-        _demo_candidate(spec, selected_features),
         lambda rows: wrapped.predict(rows[selected_features]),
+        **_demo_candidate(spec, selected_features),
     )
 
 
@@ -159,11 +158,11 @@ def _fit_pipeline_model(spec: RegressionModelSpec, splits: SearchSplits) -> Fitt
     selected_features = _spec_features(spec)
     pipeline = Pipeline(steps=[("preprocessor", spec.preprocessor), ("estimator", spec.estimator)])
     pipeline.fit(splits.train[selected_features], splits.train[TARGET_COLUMN])
-    return fitted_candidate(
+    return scored_candidate(
         splits,
         SCORING,
-        _demo_candidate(spec, selected_features),
         lambda rows: pipeline.predict(rows[selected_features]),
+        **_demo_candidate(spec, selected_features),
     )
 
 
@@ -192,22 +191,20 @@ def run_rule_baseline(splits: SearchSplits) -> FittedCandidate:
     intercept, slope = np.linalg.lstsq(design, splits.train[TARGET_COLUMN].to_numpy(), rcond=None)[
         0
     ]
-    return fitted_candidate(
+    return scored_candidate(
         splits,
         SCORING,
-        DemoCandidate(
-            candidate_id="rule-baseline",
-            model_family="rule_based",
-            feature_set="heuristic",
-            notes="Train-calibrated heuristic over growth, adoption, champion strength, and seat utilization.",
-            hyperparameters={
-                "weights": dict(zip(rule_features, weights.tolist(), strict=True)),
-                "calibration": {"intercept": float(intercept), "slope": float(slope)},
-            },
-            selected_features=rule_features,
-            random_seed=None,
-        ),
         lambda rows: intercept + slope * raw_score(rows),
+        candidate_id="rule-baseline",
+        model_family="rule_based",
+        feature_set="heuristic",
+        notes="Train-calibrated heuristic over growth, adoption, champion strength, and seat utilization.",
+        hyperparameters={
+            "weights": dict(zip(rule_features, weights.tolist(), strict=True)),
+            "calibration": {"intercept": float(intercept), "slope": float(slope)},
+        },
+        selected_features=rule_features,
+        random_seed=None,
     )
 
 
@@ -361,26 +358,23 @@ def run_hurdle_logistic_ridge(splits: SearchSplits) -> FittedCandidate:
         prob_positive = stage1.predict_proba(transformed)[:, 1]
         return prob_positive * np.maximum(stage2.predict(transformed), 0.0)
 
-    return fitted_candidate(
+    return scored_candidate(
         splits,
         SCORING,
-        DemoCandidate(
-            candidate_id="hurdle-logistic-ridge",
-            model_family="two_stage_hurdle",
-            feature_set="base",
-            notes=(
-                "Two-stage hurdle: logistic(base) for P(positive), "
-                "ridge(base) on positive-only train subset for E[amount|positive]. "
-                "Soft prediction: P(positive) * E[amount|positive]."
-            ),
-            hyperparameters={
-                "stage1": {"model": "LogisticRegression", "C": 1.0},
-                "stage2": {"model": "Ridge", "alpha": 2.0},
-                "prediction_mode": "soft_probability",
-            },
-            selected_features=selected_features,
-        ),
         predict,
+        candidate_id="hurdle-logistic-ridge",
+        model_family="two_stage_hurdle",
+        feature_set="base",
+        notes="Two-stage hurdle: logistic(base) for P(positive), "
+        "ridge(base) on positive-only train subset for E[amount|positive]. "
+        "Soft prediction: P(positive) * E[amount|positive].",
+        hyperparameters={
+            "stage1": {"model": "LogisticRegression", "C": 1.0},
+            "stage2": {"model": "Ridge", "alpha": 2.0},
+            "prediction_mode": "soft_probability",
+        },
+        selected_features=selected_features,
+        random_seed=RANDOM_STATE,
     )
 
 
@@ -456,25 +450,22 @@ def run_ridge_scale_normalized(splits: SearchSplits) -> FittedCandidate:
         rate = pipeline.predict(rows[selected_features])
         return np.maximum(rate * rows[revenue_col].to_numpy(), 0.0)
 
-    return fitted_candidate(
+    return scored_candidate(
         splits,
         SCORING,
-        DemoCandidate(
-            candidate_id="ridge-scale-norm",
-            model_family="ridge_regression",
-            feature_set="base_normalized",
-            notes=(
-                "H2: predicts expansion_rate = target / contract_value_t0, back-multiplied. "
-                "Diagnostic for scale confound: if R2 drops significantly, raw R2 is mostly scale."
-            ),
-            hyperparameters={
-                "alpha": 2.0,
-                "target_transform": "rate_normalization",
-                "normalization_feature": revenue_col,
-            },
-            selected_features=selected_features,
-        ),
         predict,
+        candidate_id="ridge-scale-norm",
+        model_family="ridge_regression",
+        feature_set="base_normalized",
+        notes="H2: predicts expansion_rate = target / contract_value_t0, back-multiplied. "
+        "Diagnostic for scale confound: if R2 drops significantly, raw R2 is mostly scale.",
+        hyperparameters={
+            "alpha": 2.0,
+            "target_transform": "rate_normalization",
+            "normalization_feature": revenue_col,
+        },
+        selected_features=selected_features,
+        random_seed=RANDOM_STATE,
     )
 
 

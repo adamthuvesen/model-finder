@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "postToolUse": [
+      {
+        "matcher": "Write",
+        "command": "sh \"$(git rev-parse --show-toplevel)/.agents/hooks/post_edit.sh\" cursor"
+      }
+    ]
+  }
+}

@@ -5,7 +5,7 @@ from typing import Literal
 
 import pytest
 
-from agentic_ml_loop.completion import (
+from model_finder.completion import (
     CompletionRecord,
     EvidenceFile,
     ResearchReview,
@@ -15,10 +15,10 @@ from agentic_ml_loop.completion import (
     record_from_evidence,
     save_completion,
 )
-from agentic_ml_loop.holdout import HoldoutSeal
-from agentic_ml_loop.io import write_json
-from agentic_ml_loop.ledger import LedgerEntry, record_retirement
-from agentic_ml_loop.runner import ExperimentSeed, init_experiment_dir
+from model_finder.holdout import HoldoutSeal
+from model_finder.io import write_json
+from model_finder.ledger import LedgerEntry, record_retirement
+from model_finder.runner import ExperimentSeed, init_experiment_dir
 from tests.conftest import SPEC
 
 

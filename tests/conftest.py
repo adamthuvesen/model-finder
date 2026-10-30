@@ -7,17 +7,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from agentic_ml_loop.candidate_result import (
+from model_finder.candidate_result import (
     CandidateResult,
     FittedCandidate,
     SearchMetrics,
     metric_key,
-    train_validation_gap,
 )
-from agentic_ml_loop.holdout import seal_holdout
-from agentic_ml_loop.results import ComparisonContext, RecordedResult
-from agentic_ml_loop.runner import ExperimentSeed, init_experiment_dir, save_candidate_result
-from agentic_ml_loop.splits import (
+from model_finder.holdout import seal_holdout
+from model_finder.results import ComparisonContext, RecordedResult
+from model_finder.runner import ExperimentSeed, init_experiment_dir, save_candidate_result
+from model_finder.splits import (
     FrameIdentity,
     SearchDataIdentity,
     SearchSplits,
@@ -36,28 +35,33 @@ def isolated_holdout_store(tmp_path_factory, monkeypatch) -> Path:
     return root
 
 
+def result_fields(score: float = 0.7) -> dict[str, object]:
+    """The fields of a valid result. A new required field needs one line here."""
+    return {
+        "candidate_id": "candidate-a",
+        "objective_metric": "val_auc",
+        "objective_score": score,
+        "metrics": {"validation": {"auc": score}},
+    }
+
+
 def candidate_result(
     candidate_id: str = "candidate-a",
     objective_metric: str = "val_auc",
     score: float = 0.7,
     validation: dict[str, float] | None = None,
+    **fields: object,
 ) -> CandidateResult:
+    """The one place tests build a result."""
     validation = validation or {metric_key(objective_metric): score}
-    metrics = SearchMetrics(train=dict(validation), validation=validation)
-    return CandidateResult(
-        candidate_id=candidate_id,
-        model_family="constant",
-        feature_set="none",
-        objective_metric=objective_metric,
-        objective_score=score,
-        split_strategy="time",
-        notes="",
-        metrics=metrics,
-        hyperparameters={},
-        selected_features=[],
-        random_seed=None,
-        bootstrap_count=None,
-        train_validation_gap=train_validation_gap(metrics, objective_metric),
+    return CandidateResult.model_validate(
+        {
+            **result_fields(score),
+            "candidate_id": candidate_id,
+            "objective_metric": objective_metric,
+            "metrics": SearchMetrics(train=dict(validation), validation=validation),
+            **fields,
+        }
     )
 
 
@@ -97,22 +101,11 @@ def fitted(splits: SearchSplits, candidate_id: str = "candidate-a") -> FittedCan
     """A deterministic candidate whose score depends on its rows."""
     score = float(splits.validation["signal"].abs().mean())
     train_score = float(splits.train["signal"].abs().mean())
-    metrics = SearchMetrics(train={"auc": train_score}, validation={"auc": score})
     return FittedCandidate(
-        result=CandidateResult(
-            candidate_id=candidate_id,
-            model_family="constant",
-            feature_set="none",
-            objective_metric="val_auc",
-            objective_score=score,
-            split_strategy="time",
-            notes="",
-            metrics=metrics,
-            hyperparameters={},
-            selected_features=["signal"],
-            random_seed=None,
-            bootstrap_count=None,
-            train_validation_gap=train_validation_gap(metrics, "val_auc"),
+        result=candidate_result(
+            candidate_id,
+            score=score,
+            metrics=SearchMetrics(train={"auc": train_score}, validation={"auc": score}),
         ),
         score_rows=lambda frame: {"auc": float(frame["signal"].abs().mean())},
     )

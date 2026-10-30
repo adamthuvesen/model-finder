@@ -36,7 +36,9 @@ experiments/**/*.parquet
 .agents/*
 !.agents/docs/
 !.agents/skills/
-.cursor/
+!.agents/hooks/
+.cursor/*
+!.cursor/hooks.json
 .claude/scheduled_tasks.lock
 
 # Verification evidence

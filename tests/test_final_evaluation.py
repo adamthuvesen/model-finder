@@ -8,14 +8,15 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
-from agentic_ml_loop.candidate_result import CandidateRunner, FittedCandidate
-from agentic_ml_loop.final_evaluation import evaluate_final, freeze_candidate, reseal_holdout
-from agentic_ml_loop.ledger import read_ledger
-from agentic_ml_loop.paths import ATTEMPT_PATH, FINAL_PATH, SELECTION_PATH
-from agentic_ml_loop.results import load_results
-from agentic_ml_loop.runner import save_candidate_result
-from agentic_ml_loop.splits import SearchSplits
-from agentic_ml_loop.validation import validate_experiment
+from model_finder.candidate_result import CandidateRunner, FittedCandidate
+from model_finder.final_evaluation import evaluate_final, freeze_candidate
+from model_finder.ledger import read_ledger
+from model_finder.paths import ATTEMPT_PATH, FINAL_PATH, SELECTION_PATH
+from model_finder.reseal import reseal_holdout
+from model_finder.results import load_results
+from model_finder.runner import save_candidate_result
+from model_finder.splits import SearchSplits
+from model_finder.validation import validate_experiment
 from tests.conftest import fitted
 
 RUNNERS: dict[str, CandidateRunner] = {"candidate-a": fitted}
@@ -47,7 +48,7 @@ def test_completed_evaluation_returns_evidence_without_refitting(scored: Path) -
 
 
 def test_freeze_requires_a_known_candidate(scored: Path) -> None:
-    with pytest.raises(ValueError, match="Expected one candidate"):
+    with pytest.raises(ValueError, match="no single candidate"):
         freeze_candidate(scored, "absent", "label")
 
 
@@ -128,7 +129,7 @@ def test_rerun_that_changes_the_result_is_rejected(scored: Path) -> None:
 def test_final_evidence_without_an_attempt_is_rejected(scored: Path) -> None:
     freeze(scored)
     (scored / FINAL_PATH).write_text("{}")
-    with pytest.raises(ValueError, match="no recorded evaluation attempt"):
+    with pytest.raises(ValueError, match="no recorded attempt"):
         evaluate_final(scored, RUNNERS)
 
 
@@ -144,7 +145,7 @@ def test_tampered_final_evidence_is_rejected(scored: Path) -> None:
 
 def test_unavailable_frozen_candidate_is_reported(scored: Path) -> None:
     freeze(scored)
-    with pytest.raises(ValueError, match="not available"):
+    with pytest.raises(ValueError, match="not in this runner"):
         evaluate_final(scored, {})
 
 

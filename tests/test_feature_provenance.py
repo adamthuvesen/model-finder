@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from agentic_ml_loop.feature_provenance import validate_feature_provenance
+from model_finder.feature_provenance import validate_feature_provenance
 
 
 @pytest.fixture

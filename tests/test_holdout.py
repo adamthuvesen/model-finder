@@ -6,15 +6,15 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from agentic_ml_loop.final_evaluation import evaluate_final
-from agentic_ml_loop.holdout import (
+from model_finder.final_evaluation import evaluate_final
+from model_finder.holdout import (
     load_sealed_holdout,
     load_search_splits,
     read_holdout_seal,
     seal_holdout,
     sealed_file_path,
 )
-from agentic_ml_loop.splits import HoldoutSplits, SearchSplits, temporal_split
+from model_finder.splits import HoldoutSplits, SearchSplits, temporal_split
 from tests.conftest import fitted, rows
 
 
@@ -57,7 +57,7 @@ def test_seal_defaults_to_local_share(tmp_path: Path, monkeypatch) -> None:
     other = tmp_path / "other"
     other.mkdir()
     seal = seal_holdout(other, search, holdout)
-    assert sealed_file_path(seal).is_relative_to(tmp_path / "home/.local/share/agentic-ml-loop")
+    assert sealed_file_path(seal).is_relative_to(tmp_path / "home/.local/share/model-finder")
 
 
 def test_resealing_is_refused(sealed: Path) -> None:
@@ -90,7 +90,7 @@ def test_store_inside_the_experiment_is_refused(tmp_path: Path, monkeypatch) -> 
 def test_empty_holdout_is_refused(tmp_path: Path) -> None:
     search, holdout = temporal_split(rows(), "when")
     empty = HoldoutSplits(holdout=holdout.holdout.iloc[:0])
-    with pytest.raises(ValueError, match="non-empty"):
+    with pytest.raises(ValueError, match="empty"):
         seal_holdout(tmp_path, SearchSplits(search.train, search.validation), empty)
 
 

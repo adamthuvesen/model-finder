@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agentic_ml_loop.viz.bundle import bundle
-from agentic_ml_loop.viz.generate import (
+from model_finder.viz.bundle import bundle
+from model_finder.viz.generate import (
     candidate_summaries,
     parse_experiment_md,
     replay_scenes,

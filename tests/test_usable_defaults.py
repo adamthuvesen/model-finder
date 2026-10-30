@@ -7,28 +7,24 @@ from pathlib import Path
 
 import pytest
 
-from agentic_ml_loop.candidate_result import (
-    CandidateResult,
+from model_finder.candidate_result import (
     CandidateRunner,
     FittedCandidate,
     SearchMetrics,
 )
-from agentic_ml_loop.cli.main import main
-from agentic_ml_loop.cli.runner import RunnerConfig, run_runner_main
-from agentic_ml_loop.ledger import read_ledger
-from agentic_ml_loop.runner import ExperimentSeed
-from agentic_ml_loop.splits import SearchSplits
-from tests.conftest import SPEC, rows
+from model_finder.cli.main import main
+from model_finder.cli.runner import RunnerConfig, run_runner_main
+from model_finder.ledger import read_ledger
+from model_finder.runner import ExperimentSeed
+from model_finder.splits import SearchSplits
+from tests.conftest import SPEC, candidate_result, rows
 
 
 def _quick(candidate_id: str, score: float) -> CandidateRunner:
     def runner(_splits: SearchSplits) -> FittedCandidate:
         return FittedCandidate(
-            result=CandidateResult(
-                candidate_id=candidate_id,
-                objective_metric="val_auc",
-                objective_score=score,
-                metrics=SearchMetrics(validation={"auc": score}),
+            result=candidate_result(
+                candidate_id, score=score, metrics=SearchMetrics(validation={"auc": score})
             ),
             score_rows=lambda _rows: {"auc": score},
         )

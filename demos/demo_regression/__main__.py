@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentic_ml_loop.cli.runner import RunnerConfig, run_runner_main
-from agentic_ml_loop.runner import ExperimentSeed
 from demos.common import CODE_ROOT
 from demos.demo_regression.data import TARGET_COLUMN, TIME_COLUMN
 from demos.demo_regression.generate_data import generate_demo_regression_dataset
 from demos.demo_regression.modeling import CANDIDATE_RUNNERS
+from model_finder.cli.runner import RunnerConfig, run_runner_main
+from model_finder.runner import ExperimentSeed
 
 _HERE = Path(__file__).resolve().parent
 

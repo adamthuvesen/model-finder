@@ -11,34 +11,35 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from agentic_ml_loop import final_evaluation
-from agentic_ml_loop.candidate_result import CandidateRunner
-from agentic_ml_loop.completion import (
+from model_finder import final_evaluation, reseal
+from model_finder.candidate_result import CandidateRunner
+from model_finder.completion import (
     CompletionRecord,
     ResearchReview,
     assess_completion,
     check_completion,
     evidence_file,
 )
-from agentic_ml_loop.data_audit import OverlapReport
-from agentic_ml_loop.final_evaluation import evaluate_final, freeze_candidate, reseal_holdout
-from agentic_ml_loop.holdout import (
+from model_finder.data_audit import OverlapReport
+from model_finder.final_evaluation import evaluate_final, freeze_candidate
+from model_finder.holdout import (
     consumed_holdout_count,
     load_search_splits,
     read_holdout_seal,
     seal_holdout,
     sealed_file_path,
 )
-from agentic_ml_loop.io import write_json
-from agentic_ml_loop.ledger import entries_for, read_ledger, store_root
-from agentic_ml_loop.paths import ATTEMPT_PATH, FINAL_PATH
-from agentic_ml_loop.run_evidence import (
+from model_finder.io import write_json
+from model_finder.ledger import entries_for, read_ledger, store_root
+from model_finder.paths import ATTEMPT_PATH, FINAL_PATH
+from model_finder.reseal import reseal_holdout
+from model_finder.run_evidence import (
     _dependencies_sha256,
     code_fingerprint,
     recorded_fingerprint_is_current,
 )
-from agentic_ml_loop.runner import ExperimentSeed, init_experiment_dir, save_candidate_result
-from agentic_ml_loop.splits import HoldoutSplits, SearchSplits, temporal_split
+from model_finder.runner import ExperimentSeed, init_experiment_dir, save_candidate_result
+from model_finder.splits import HoldoutSplits, SearchSplits, temporal_split
 from tests.conftest import SPEC, fitted, rows
 
 RUNNERS: dict[str, CandidateRunner] = {"candidate-a": fitted}
@@ -122,7 +123,7 @@ def test_killed_reseal_leaves_no_readable_holdout(
         raise RuntimeError("killed before commit_seal")
 
     with monkeypatch.context() as patch:
-        patch.setattr(final_evaluation, "commit_seal", kill)
+        patch.setattr(reseal, "commit_seal", kill)
         with pytest.raises(RuntimeError, match="killed"):
             reseal_holdout(scored, _new_rows(), "Retiring.")
 
@@ -148,7 +149,7 @@ def test_retired_unread_holdout_cannot_be_read(scored: Path, code_root: Path, mo
         raise RuntimeError("killed")
 
     with monkeypatch.context() as patch:
-        patch.setattr(final_evaluation, "_write_history", kill)
+        patch.setattr(reseal, "_write_history", kill)
         with pytest.raises(RuntimeError):
             reseal_holdout(scored, _new_rows(), "Retiring.")
     save_candidate_result(scored, "candidate-a", RUNNERS, code_root)
@@ -441,7 +442,7 @@ def test_resealing_the_read_live_holdout_changes_nothing(scored: Path) -> None:
 
 def test_retry_after_commit_is_a_no_op_and_keeps_fresh_rows(scored: Path, monkeypatch) -> None:
     with monkeypatch.context() as patch:
-        patch.setattr(final_evaluation, "remove_other_sealed_files", _kill)
+        patch.setattr(reseal, "remove_other_sealed_files", _kill)
         with pytest.raises(RuntimeError):
             reseal_holdout(scored, _new_rows(), "Retiring.")
     committed = read_holdout_seal(scored)
@@ -459,7 +460,7 @@ def test_prior_count_is_the_same_at_every_kill_point(
     _freeze_and_evaluate(scored)
     with monkeypatch.context() as patch:
         if kill_point:
-            patch.setattr(final_evaluation, kill_point, _kill)
+            patch.setattr(reseal, kill_point, _kill)
             with pytest.raises(RuntimeError):
                 reseal_holdout(scored, _new_rows(), "Retiring.")
         else:
@@ -475,7 +476,7 @@ def test_deleting_history_does_not_lower_the_count(scored: Path) -> None:
 
 def test_kill_before_history_then_second_reseal_counts_two(scored: Path, monkeypatch) -> None:
     with monkeypatch.context() as patch:
-        patch.setattr(final_evaluation, "_write_history", _kill)
+        patch.setattr(reseal, "_write_history", _kill)
         with pytest.raises(RuntimeError):
             reseal_holdout(scored, _new_rows(), "First.")
     reseal_holdout(scored, _new_rows(), "First.")

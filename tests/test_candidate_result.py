@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from agentic_ml_loop.candidate_result import CandidateResult, SearchMetrics, train_validation_gap
-from tests.conftest import candidate_result
+from model_finder.candidate_result import CandidateResult, SearchMetrics, train_validation_gap
+from tests.conftest import candidate_result, result_fields
 
 
 def _payload(**overrides: object) -> dict[str, object]:
@@ -19,12 +19,7 @@ def test_split_keys_are_an_allowlist(split: str) -> None:
 
 
 def test_a_quick_candidate_needs_only_its_score() -> None:
-    result = CandidateResult(
-        candidate_id="quick",
-        objective_metric="val_auc",
-        objective_score=0.7,
-        metrics=SearchMetrics(validation={"auc": 0.7}),
-    )
+    result = CandidateResult.model_validate(result_fields())
     assert result.random_seed is None
     assert result.bootstrap_count is None
     assert result.train_validation_gap is None
@@ -48,7 +43,7 @@ def test_interval_requires_a_bootstrap_count() -> None:
 
 
 def test_objective_must_be_the_validation_metric() -> None:
-    with pytest.raises(ValidationError, match="val_ or validation_"):
+    with pytest.raises(ValidationError, match="not a validation metric"):
         CandidateResult.model_validate(_payload(objective_metric="test_auc"))
     with pytest.raises(ValidationError, match="differs"):
         CandidateResult.model_validate(_payload(objective_score=0.1))

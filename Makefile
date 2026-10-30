@@ -4,7 +4,11 @@ RUN := uv run --locked --extra models --extra deep
 # `databricks` extra installs. Remove these when the connector allows the fixed versions.
 REVIEWED_VULNS := --ignore-vuln CVE-2026-49272 --ignore-vuln PYSEC-2026-4114 --ignore-vuln PYSEC-2026-3925 --ignore-vuln PYSEC-2026-3926 --ignore-vuln PYSEC-2026-3927
 
-.PHONY: check audit lock lint types boundaries rules deps dead test workflows secrets vulnerabilities
+.PHONY: quick check audit lock lint types boundaries rules deps dead test workflows secrets vulnerabilities
+
+# Only the Python files that changed, with no tests. Measured: 0.7s for one file, 2.7s for 49.
+quick:
+	@.venv/bin/python scripts/quick.py
 
 # Offline gate. CI runs the same targets.
 check: lock lint types boundaries rules deps dead test
@@ -36,7 +40,7 @@ dead:
 	$(RUN) vulture
 
 test:
-	$(RUN) pytest --quiet --cov --cov-fail-under=89
+	$(RUN) pytest --quiet -n auto --cov --cov-fail-under=89
 
 workflows:
 	$(RUN) zizmor --offline .github/workflows

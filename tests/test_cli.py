@@ -8,15 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from agentic_ml_loop.cli.main import CONTRACT_DOCUMENTS, main
-from agentic_ml_loop.cli.runner import RunnerConfig, run_runner_main
-from agentic_ml_loop.cli.setup import PACKAGED_SKILLS
-from agentic_ml_loop.final_evaluation import freeze_candidate
-from agentic_ml_loop.holdout import load_search_splits
-from agentic_ml_loop.ledger import store_root
-from agentic_ml_loop.paths import DATA_DIRNAME
-from agentic_ml_loop.runner import ExperimentSeed, save_candidate_result
-from agentic_ml_loop.sources import SnapshotFreezeRequest, freeze_snapshot
+from model_finder.cli.main import CONTRACT_DOCUMENTS, main
+from model_finder.cli.runner import RunnerConfig, run_runner_main
+from model_finder.cli.setup import PACKAGED_SKILLS
+from model_finder.final_evaluation import freeze_candidate
+from model_finder.holdout import load_search_splits
+from model_finder.paths import DATA_DIRNAME
+from model_finder.runner import ExperimentSeed, save_candidate_result
+from model_finder.sources import SnapshotFreezeRequest, freeze_snapshot
 from tests.conftest import fitted, rows
 
 
@@ -47,7 +46,7 @@ def test_missing_experiment_reports_one_line_and_exits_1(
     captured = capsys.readouterr()
     assert code == 1
     assert captured.out == ""
-    assert captured.err.startswith("error: Experiment directory does not exist")
+    assert "experiment directory does not exist. Fix:" in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -67,7 +66,7 @@ def test_invalid_results_report_a_concise_error(sealed: Path, code_root: Path, c
     )
     err = capsys.readouterr().err
     assert code == 1
-    assert err.startswith("error: invalid")
+    assert err.startswith("results.json: ")
     assert "objective_score" in err
 
 
@@ -184,7 +183,7 @@ def test_driver_error_is_one_line_without_a_traceback(tmp_path: Path, capsys) ->
     )
     err = capsys.readouterr().err
     assert code == 1
-    assert err.startswith("error: duckdb query failed")
+    assert err.startswith("duckdb query failed")
     assert err.count("\n") == 1
 
 
@@ -218,7 +217,7 @@ def test_second_setup_changes_nothing(tmp_path: Path, capsys) -> None:
 def test_setup_replaces_a_link_to_an_older_install(tmp_path: Path) -> None:
     skills = tmp_path / ".agents" / "skills"
     skills.mkdir(parents=True)
-    (skills / "research").symlink_to("../../old/agentic_ml_loop/skills/research")
+    (skills / "research").symlink_to("../../old/model_finder/skills/research")
     assert main(["setup", "--repo", str(tmp_path)]) == 0
     assert (skills / "research" / "SKILL.md").is_file()
 
@@ -230,7 +229,7 @@ def test_contract_prints_each_packaged_document(document: str, capsys) -> None:
 
 
 def test_packaged_skills_need_no_checkout() -> None:
-    needs_checkout = re.compile(r"\.\./\.\./|src/agentic_ml_loop|\]\(docs/|\]\(demos/")
+    needs_checkout = re.compile(r"\.\./\.\./|src/model_finder|\]\(docs/|\]\(demos/")
     assert [path.name for path in _skill_files() if needs_checkout.search(path.read_text())] == []
 
 
@@ -296,6 +295,16 @@ def test_check_features_reads_dates_from_search_rows(sealed: Path, capsys) -> No
     assert "Time column is missing" in capsys.readouterr().err
 
 
+DENY_RULES = [
+    "Read(//**/model-finder/holdouts/**)",
+    "Edit(//**/model-finder/holdouts/**)",
+    "Bash(*model-finder/holdouts*)",
+    "Read(//**/agentic-ml-loop/holdouts/**)",
+    "Edit(//**/agentic-ml-loop/holdouts/**)",
+    "Bash(*agentic-ml-loop/holdouts*)",
+]
+
+
 def test_setup_merges_the_deny_rule_and_keeps_other_settings(tmp_path: Path, capsys) -> None:
     settings_path = tmp_path / ".claude" / "settings.json"
     settings_path.parent.mkdir()
@@ -304,16 +313,9 @@ def test_setup_merges_the_deny_rule_and_keeps_other_settings(tmp_path: Path, cap
     )
     assert main(["setup", "--repo", str(tmp_path)]) == 0
     settings = json.loads(settings_path.read_text())
-    store = store_root().resolve().as_posix()
     assert settings["model"] == "x"
     assert settings["permissions"]["allow"] == ["Bash(ls)"]
-    assert settings["permissions"]["deny"] == [
-        "Read(./.env)",
-        f"Read(/{store}/**)",
-        f"Edit(/{store}/**)",
-        "Bash(*agentic-ml-loop/holdouts*)",
-    ]
-    assert store.startswith("/") and settings["permissions"]["deny"][1].startswith("Read(//")
+    assert settings["permissions"]["deny"] == ["Read(./.env)", *DENY_RULES]
     first = settings_path.read_text()
     capsys.readouterr()
     assert main(["setup", "--repo", str(tmp_path)]) == 0
@@ -338,38 +340,38 @@ def _deny_rules(repo: Path) -> list[str]:
     return json.loads((repo / ".claude/settings.json").read_text())["permissions"]["deny"]
 
 
-def test_store_under_home_gets_a_portable_rule(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.delenv("XDG_DATA_HOME")
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    assert main(["setup", "--repo", str(tmp_path / "repo")]) == 0
-    rule = "~/.local/share/agentic-ml-loop/holdouts/**"
-    assert _deny_rules(tmp_path / "repo")[:2] == [f"Read({rule})", f"Edit({rule})"]
+def test_setup_writes_the_same_bytes_on_any_machine(tmp_path: Path, monkeypatch) -> None:
+    written: list[str] = []
+    for name, environment in (
+        ("home", {"HOME": str(tmp_path / "home_a")}),
+        ("other", {"HOME": str(tmp_path / "home_b"), "XDG_DATA_HOME": str(tmp_path / "custom")}),
+    ):
+        monkeypatch.delenv("XDG_DATA_HOME")
+        for key, value in environment.items():
+            monkeypatch.setenv(key, value)
+        repo = tmp_path / name
+        assert main(["setup", "--repo", str(repo)]) == 0
+        written.append((repo / ".claude/settings.json").read_text())
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "unused"))
+    assert written[0] == written[1]
+    assert _deny_rules(tmp_path / "home") == DENY_RULES
+    assert str(tmp_path) not in written[0]
 
 
-def test_another_store_replaces_the_engine_rules_and_keeps_user_rules(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_setup_replaces_rules_from_an_earlier_version_and_keeps_user_rules(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
-    user_rules = ["Read(./.env)", "Read(//srv/secrets/**)", "Read(~/agentic-ml-loop/notes/**)"]
+    user_rules = ["Read(./.env)", "Read(//srv/secrets/**)", "Read(~/model-finder/notes/**)"]
+    earlier = [
+        "Read(~/.local/share/model-finder/holdouts/**)",
+        "Edit(~/.local/share/model-finder/holdouts/**)",
+        "Read(//Users/someone/custom/model-finder/holdouts/**)",
+        "Edit(//Users/someone/custom/model-finder/holdouts/**)",
+    ]
     settings = repo / ".claude/settings.json"
     settings.parent.mkdir(parents=True)
-    settings.write_text(json.dumps({"permissions": {"deny": user_rules}}))
+    settings.write_text(json.dumps({"permissions": {"deny": [*user_rules, *earlier]}}))
     assert main(["setup", "--repo", str(repo)]) == 0
-    first_store = store_root().resolve().as_posix()
-
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "other"))
-    assert main(["setup", "--repo", str(repo)]) == 0
-    second_store = store_root().resolve().as_posix()
-
-    rules = _deny_rules(repo)
-    assert first_store != second_store
-    assert not [rule for rule in rules if first_store in rule]
-    assert rules == [
-        *user_rules,
-        "Bash(*agentic-ml-loop/holdouts*)",
-        f"Read(/{second_store}/**)",
-        f"Edit(/{second_store}/**)",
-    ]
+    assert _deny_rules(repo) == [*user_rules, *DENY_RULES]
 
 
 _TWO_RUNNERS = {
@@ -439,7 +441,7 @@ def test_rebuild_refuses_an_invalid_run_record(sealed: Path, code_root: Path, ca
     record = next((sealed / "work/runs").glob("*.json"))
     record.write_text("{ also damaged")
     assert _rebuild(sealed) == 1
-    assert f"Run record {record} is invalid" in capsys.readouterr().err
+    assert f"{record}: Run record is invalid" in capsys.readouterr().err
     assert leaderboard.read_text() == "{ damaged"
 
 

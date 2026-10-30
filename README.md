@@ -1,6 +1,6 @@
-# Agentic ML Loop
+# Model Finder
 
-![License](https://img.shields.io/github/license/adamthuvesen/agentic-ml-loop) ![Python](https://img.shields.io/badge/python-3.13%2B-blue)
+![License](https://img.shields.io/github/license/adamthuvesen/model-finder) ![Python](https://img.shields.io/badge/python-3.13%2B-blue)
 
 A model-search engine for a coding agent running under a native client `/goal`.
 The client keeps the agent going. This repo makes the result trustworthy:
@@ -9,15 +9,13 @@ The client keeps the agent going. This repo makes the result trustworthy:
 - Selection is frozen before the holdout is read, and a read holdout leaves a permanent record.
 - Every result is bound to its specification, data, and code, and a completion check verifies the chain.
 
-The repo keeps its name from the supervisor loop it used to be.
+This repo was named `agentic-ml-loop` while it was a supervisor loop.
 [Read why that loop was replaced](.agents/docs/decisions/native-goals.md).
 
 ## Migrating from `python -m loop`
 
-The loop, its runner presets, the referee, and the benchmark are gone. To keep using them, check
-out the git tag `loop-final`. To move forward, start a `/goal` as shown below. Old `results.json`
-files fail validation, because many hold test metrics. Preserve them and rerun candidates in a new
-experiment.
+The loop is gone. To keep using it, check out the git tag `loop-final`. Old `results.json` files fail validation, so
+rerun candidates in a new experiment.
 
 ## Try it offline
 
@@ -44,66 +42,33 @@ uv run experiment replay experiments/my_run           # writes outputs/replay.ht
 
 `evaluate-final` needs a frozen selection. A second read needs `--allow-reread --reason <text>`, and it labels the
 estimate exploratory. Sealed rows are written under
-`$XDG_DATA_HOME/agentic-ml-loop/holdouts/`, defaulting to `~/.local/share`.
+`$XDG_DATA_HOME/model-finder/holdouts/`, defaulting to `~/.local/share`.
 Open [`examples/demo_bootstrap_replay.html`](examples/demo_bootstrap_replay.html) to see a replay
 without running anything.
 
 ## Use your own CSV
 
-Put this file at `my_model/run.py`. The runner fingerprints its own folder, so keep data and experiments outside it.
-
-```python
-from pathlib import Path
-
-import pandas as pd
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score
-
-from agentic_ml_loop.candidate_result import CandidateResult, FittedCandidate, SearchMetrics
-from agentic_ml_loop.cli.runner import RunnerConfig, run_runner_main
-from agentic_ml_loop.runner import ExperimentSeed
-
-CSV, TARGET, FEATURES = Path("rows.csv"), "label", ["x"]
-
-
-def logreg(splits):
-    model = LogisticRegression().fit(splits.train[FEATURES], splits.train[TARGET])
-
-    def score(rows):
-        return {"auc": float(roc_auc_score(rows[TARGET], model.predict_proba(rows[FEATURES])[:, 1]))}
-
-    metrics = score(splits.validation)
-    result = CandidateResult(
-        candidate_id="logreg",
-        objective_metric="val_auc",
-        objective_score=metrics["auc"],
-        metrics=SearchMetrics(validation=metrics),
-    )
-    return FittedCandidate(result=result, score_rows=score)
-
-
-raise SystemExit(
-    run_runner_main(
-        RunnerConfig(
-            seed=ExperimentSeed("my_run"),
-            candidate_runners={"logreg": logreg},
-            rows_loader=lambda seed: pd.read_csv(CSV),
-            rows_source=CSV,
-            time_column="when",
-            target_column=TARGET,
-            code_root=Path(__file__).parent,
-        )
-    )
-)
+```bash
+uv run experiment new churn --csv rows.csv --target label   # prints a first leaderboard
+uv run experiment candidate new gbdt                        # adds one small function to experiments/churn/model/candidates.py
+uv run python experiments/churn/model/run.py run-candidate --candidate gbdt
+uv run experiment next                                      # says what could come next
 ```
+
+A candidate is one function. It gets train and validation rows and returns a function that predicts. The engine scores it
+and records the result. Lines marked `CHANGE` are the choices to review. A date-like column sets the split order. Pass
+`--no-holdout` to keep every row for search. The result is then labelled exploratory.
+
+## Use it from another repository
 
 ```bash
-uv run --extra models python my_model/run.py init-demo --experiment experiments/my_run --no-holdout
-uv run --extra models python my_model/run.py run-candidate --experiment experiments/my_run --candidate logreg
-uv run experiment leaderboard experiments/my_run
+uv add model-finder                       # or, to develop against a local engine checkout:
+uv add --editable ../model-finder
+uv run experiment setup                      # links skills, adds the holdout deny rule and the agent hooks
 ```
 
-Drop `--no-holdout` to seal a holdout. The sealed rows stay readable in `rows.csv`, and the seal warns about that.
+Your candidates, loaders, and metrics live in your own modules: `RunnerConfig`, `Candidates`, and `Scoring(..., evaluate=...)`
+take them with no engine change.
 
 ## Run research
 
@@ -116,18 +81,7 @@ Inside Claude Code or Codex, start one goal that names the skill and the experim
 To create a new experiment from a dataset, use the `experiment-spec` skill.
 Finish with `uv run experiment complete-check experiments/my_run`. It prints `complete`, `complete, exploratory`,
 or `not complete`.
-[docs/evidence.md](docs/evidence.md) explains the chain and what it does not prove.
-
-## Replacing a read holdout
-
-If a holdout informed a decision, seal new rows:
-
-```bash
-uv run experiment reseal --experiment experiments/my_run --rows new_rows.parquet --note "Why, and where the rows came from"
-```
-
-Search reopens, and the old estimate stays on record as exploratory. A holdout's identity is its sealed file's
-hash. Reading a file a second time, in any experiment, needs `--allow-reread --reason <text>`. The engine does not recognize similar data: [docs/evidence.md](docs/evidence.md) lists the limits.
+`uv run experiment contract evidence` explains the labels and what they do not prove.
 
 ## Demos
 
@@ -140,7 +94,6 @@ hash. Reading a file a second time, in any experiment, needs `--allow-reread --r
 
 All data is synthetic and generated in memory. Run `python -m demos.<demo> list-candidates`.
 Each `init-demo` generates new rows, so you can run a demo as many times as you like.
-Evaluating a repeated `--data-seed` whose holdout was read needs `--allow-reread --reason <text>`.
 
 ## Warehouse snapshots (optional)
 
@@ -154,16 +107,14 @@ uv run experiment pull --experiment experiments/<id> --source duckdb \
 uv run experiment seal --experiment experiments/<id> --time-column event_date
 ```
 
-A pull creates the directory and writes `data/snapshot.parquet` and `dataset_manifest.json`. The
-manifest holds the query, as-of point, schema hash, and content hash. Pulls refuse any write, and no
-flag overrides that. They also refuse queries that are not reproducible, unless you pass `--allow-nondeterministic --reason <text>`, which labels the result exploratory, and queries that sqlglot cannot parse.
-A pull into a sealed experiment is refused, because it would put holdout rows back. Each source has a `SETUP.md` under
-[`src/agentic_ml_loop/sources/bundles/`](src/agentic_ml_loop/sources/bundles/). DuckDB and local
-Postgres are tested end to end. The other connectors are tested against mocked clients.
+Pulls refuse any write, and no flag overrides that. Each source has a `SETUP.md` under
+[`src/model_finder/sources/bundles/`](src/model_finder/sources/bundles/). DuckDB and local Postgres are tested end
+to end. The other connectors are tested against mocked clients.
 
 ## Develop
 
 ```bash
 uv sync --extra models --extra deep
-make check    # lock, ruff, strict types, import contracts, ast-grep, deptry, vulture, tests
+make quick    # only changed Python files, no tests
+make check    # the gate: lock, ruff, strict types, import contracts, ast-grep, deptry, vulture, tests
 ```

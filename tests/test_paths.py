@@ -1,4 +1,4 @@
-"""Tests for ``agentic_ml_loop.paths`` — canonical experiment output directories."""
+"""Tests for ``model_finder.paths`` — canonical experiment output directories."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agentic_ml_loop.paths import outputs_dir, scripts_dir, work_dir
+from model_finder.paths import outputs_dir, scripts_dir, work_dir
 
 
 @pytest.fixture

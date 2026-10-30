@@ -1,4 +1,4 @@
-"""Tests for the warehouse ingestion layer (agentic_ml_loop.sources).
+"""Tests for the warehouse ingestion layer (model_finder.sources).
 
 Structural and offline by design: the creds-free DuckDB path is exercised for
 real; the proprietary adapters are checked via fakes. No live warehouse, no
@@ -7,37 +7,41 @@ credentials.
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import json
+import shutil
 import sys
 import types
 
 import pytest
 
-from agentic_ml_loop.io import file_sha256
-from agentic_ml_loop.sources import (
+from model_finder.io import file_sha256
+from model_finder.sources import (
     DatasetManifest,
     MissingSourceExtra,
     NonDeterministicQueryError,
     SnapshotFreezeRequest,
     SnapshotIntegrityError,
+    adapters,
     apply_as_of,
     dataset_manifest_from_table,
     freeze_snapshot,
     get_extractor,
     list_bundles,
     read_snapshot,
+    registry,
     require_deterministic_query,
     verify_snapshot,
 )
-from agentic_ml_loop.sources.adapters import (
+from model_finder.sources.adapters import (
     DatabricksExtractor,
     RedshiftExtractor,
     _to_adbc_db_kwargs,
 )
-from agentic_ml_loop.sources.errors import SourceError
-from agentic_ml_loop.sources.query import require_read_only_query
-from agentic_ml_loop.validation import validate_experiment
+from model_finder.sources.errors import SourceError
+from model_finder.sources.query import require_read_only_query
+from model_finder.validation import validate_experiment
 
 pa = pytest.importorskip("pyarrow")
 pq = pytest.importorskip("pyarrow.parquet")
@@ -534,9 +538,9 @@ def test_bundles_carry_no_inline_credentials() -> None:
 # --------------------------------------------------------------------------- #
 def test_importing_sources_does_not_import_warehouse_clients(monkeypatch) -> None:
     for name in list(sys.modules):
-        if name.startswith("agentic_ml_loop.sources"):
+        if name.startswith("model_finder.sources"):
             monkeypatch.delitem(sys.modules, name, raising=False)
-    import agentic_ml_loop.sources  # noqa: F401
+    import model_finder.sources  # noqa: F401
 
     for client in (
         "adbc_driver_manager",
@@ -552,7 +556,7 @@ def test_importing_sources_does_not_import_warehouse_clients(monkeypatch) -> Non
 # CLI
 # --------------------------------------------------------------------------- #
 def test_cli_pull_reports_clean_error_on_nondeterministic_query(tmp_path) -> None:
-    from agentic_ml_loop.cli.main import main
+    from model_finder.cli.main import main
 
     exit_code = main(
         [
@@ -571,7 +575,7 @@ def test_cli_pull_reports_clean_error_on_nondeterministic_query(tmp_path) -> Non
 
 
 def test_cli_pull_reports_clean_error_on_missing_postgres_uri(tmp_path) -> None:
-    from agentic_ml_loop.cli.main import main
+    from model_finder.cli.main import main
 
     experiment_dir = tmp_path / "exp"
     experiment_dir.mkdir()
@@ -668,3 +672,31 @@ def test_adbc_key_mapping_bigquery_and_passthrough() -> None:
     assert out["adbc.bigquery.sql.project_id"] == "p"
     # Already-namespaced keys pass through unchanged.
     assert out["adbc.bigquery.sql.dataset_id"] == "d"
+
+
+def test_a_new_adbc_source_is_one_bundle_file(tmp_path, monkeypatch) -> None:
+    bundles = tmp_path / "bundles"
+    shutil.copytree(registry.BUNDLES_DIR, bundles)
+    (bundles / "newsql").mkdir()
+    (bundles / "newsql/source.json").write_text(
+        json.dumps(
+            {
+                "source_type": "newsql",
+                "display_name": "NewSQL",
+                "extra": "newsql",
+                "package": "adbc-driver-newsql",
+                "driver": "adbc",
+                "description": "A new warehouse.",
+                "adbc_module": "adbc_driver_newsql.dbapi",
+                "connection_keys": {"account": "adbc.newsql.account"},
+            }
+        )
+    )
+    monkeypatch.setattr(registry, "BUNDLES_DIR", bundles)
+    try:
+        reloaded = importlib.reload(adapters)
+        assert "newsql" in reloaded.SUPPORTED_SOURCE_TYPES
+        assert reloaded.AdbcExtractor("newsql", {"account": "a"}).driver == "adbc"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(adapters)

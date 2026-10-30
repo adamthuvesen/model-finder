@@ -1,6 +1,0 @@
-id: results-json-engine-only
-valid:
-  - results = load_results(experiment_dir)
-invalid:
-  - write_results(experiment_dir, [])
-  - from agentic_ml_loop.results import RESULTS_FILE_NAME

@@ -1,1 +1,0 @@
-src/agentic_ml_loop/contract/guidelines.md

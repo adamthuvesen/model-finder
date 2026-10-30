@@ -1,9 +1,27 @@
 {
   "permissions": {
     "deny": [
-      "Read(~/.local/share/agentic-ml-loop/**)",
-      "Edit(~/.local/share/agentic-ml-loop/**)",
+      "Read(~/.local/share/model-finder/**)",
+      "Edit(~/.local/share/model-finder/**)",
+      "Bash(*model-finder/holdouts*)",
+      "Read(//**/model-finder/holdouts/**)",
+      "Edit(//**/model-finder/holdouts/**)",
+      "Read(//**/agentic-ml-loop/holdouts/**)",
+      "Edit(//**/agentic-ml-loop/holdouts/**)",
       "Bash(*agentic-ml-loop/holdouts*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$(git rev-parse --show-toplevel)/.agents/hooks/post_edit.sh\" claude"
+          }
+        ]
+      }
     ]
   }
 }

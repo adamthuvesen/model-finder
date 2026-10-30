@@ -1,52 +1,9 @@
-# Model Search Experiment
+# demo_regression
 
-## Title
+## Question
 
-Synthetic regression demo
-
-## Goal
-
-Predict 180-day net revenue expansion amount for SaaS accounts using current health, product, and commercial signals.
-
-## Baseline
-
-A train-calibrated heuristic over growth, adoption, champion strength, and seat utilization.
-
-## Dataset
-
-Bundled synthetic tabular dataset generated in-repo by `demos/demo_regression/generate_data.py`.
-
-## Target
-
-`net_revenue_change_180d`
-
-## Problem Type
-
-Regression
-
-## Split Strategy
-
-Time split with 60% train, 20% validation, and a sealed 20% holdout.
+Can a model beat its baseline on this synthetic regression problem?
 
 ## Objective Metric
 
 Validation R^2 (`val_r2`) for candidate ranking, with holdout R^2 reported in final evaluation only.
-
-## Candidate Families
-
-- rule-based heuristic baseline
-- ridge regression
-- xgboost regressor
-
-## Constraints
-
-- deterministic demo
-- no external data dependencies
-- no holdout leakage into ranking or model selection
-- one bounded hypothesis test per journal entry
-
-## Success Definition
-
-- establish a trustworthy regression baseline
-- compare at least one linear and one tree-based candidate
-- keep a valid leaderboard and summary

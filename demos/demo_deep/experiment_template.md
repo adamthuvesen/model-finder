@@ -1,52 +1,9 @@
-# Model Search Experiment
+# demo_deep
 
-## Title
+## Question
 
-Synthetic PyTorch tabular demo
-
-## Goal
-
-Show how a small feed-forward network on tabular features compares to a linear baseline when the label boundary is nonlinear.
-
-## Baseline
-
-Logistic regression on scaled numeric signals and one-hot channel.
-
-## Dataset
-
-Bundled synthetic tabular dataset generated in-repo by `demos/demo_deep/generate_data.py`.
-The target mixes a ring boundary, feature interactions, and sinusoidal terms.
-
-## Target
-
-`will_convert`
-
-## Problem Type
-
-Binary classification
-
-## Split Strategy
-
-Time split with 60% train, 20% validation, and a sealed 20% holdout.
+Can a model beat its baseline on this synthetic deep problem?
 
 ## Objective Metric
 
 Validation AUC (`val_auc`) for candidate ranking, with holdout AUC reported in final evaluation only for transparency.
-
-## Candidate Families
-
-- logistic regression
-- pytorch MLP (shallow, deep, wide)
-
-## Constraints
-
-- deterministic demo
-- CPU-friendly training (seconds, not minutes)
-- requires `uv sync --extra deep`
-- one bounded hypothesis test per journal entry
-
-## Success Definition
-
-- linear baseline established
-- at least one MLP beats logreg on validation AUC
-- valid leaderboard and reproducible training seeds

@@ -14,14 +14,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
-from agentic_ml_loop.candidate_result import CandidateRunner, FittedCandidate
-from agentic_ml_loop.splits import SearchSplits
 from demos.common import (
     RANDOM_STATE,
-    DemoCandidate,
-    DemoScoring,
     classification_metrics,
-    fitted_candidate,
 )
 from demos.demo_classification.data import (
     BASE_NUMERIC_COLUMNS,
@@ -32,8 +27,11 @@ from demos.demo_classification.data import (
     base_feature_columns,
     engineered_feature_columns,
 )
+from model_finder.candidate_result import CandidateRunner, FittedCandidate
+from model_finder.candidates import Scoring, scored_candidate
+from model_finder.splits import SearchSplits
 
-SCORING = DemoScoring(TARGET_COLUMN, "val_auc", classification_metrics)
+SCORING = Scoring(TARGET_COLUMN, "val_auc", classification_metrics)
 
 
 @dataclass(frozen=True)
@@ -97,18 +95,17 @@ def _fit_pipeline_model(spec: PipelineModelSpec, splits: SearchSplits) -> Fitted
         ]
     )
     pipeline.fit(splits.train[selected_features], splits.train[TARGET_COLUMN])
-    return fitted_candidate(
+    return scored_candidate(
         splits,
         SCORING,
-        DemoCandidate(
-            candidate_id=spec.candidate_id,
-            model_family=spec.model_family,
-            feature_set=spec.feature_set,
-            notes=spec.notes,
-            hyperparameters=spec.hyperparameters,
-            selected_features=selected_features,
-        ),
         lambda rows: pipeline.predict_proba(rows[selected_features])[:, 1],
+        candidate_id=spec.candidate_id,
+        model_family=spec.model_family,
+        feature_set=spec.feature_set,
+        notes=spec.notes,
+        hyperparameters=spec.hyperparameters,
+        selected_features=selected_features,
+        random_seed=RANDOM_STATE,
     )
 
 
@@ -124,26 +121,24 @@ def run_rule_baseline(splits: SearchSplits) -> FittedCandidate:
         )
         return np.clip(0.05 + 0.90 * raw, 0.05, 0.95)
 
-    return fitted_candidate(
+    return scored_candidate(
         splits,
         SCORING,
-        DemoCandidate(
-            candidate_id="rule-baseline",
-            model_family="rule_based",
-            feature_set="heuristic",
-            notes="Thresholded heuristic over usage growth, feature adoption, and sponsor signals.",
-            hyperparameters={},
-            selected_features=[
-                "usage_growth_90d",
-                "feature_adoption_count",
-                "seat_utilization",
-                "has_exec_sponsor",
-                "previous_expansion",
-                "plan_tier",
-            ],
-            random_seed=None,
-        ),
         score,
+        candidate_id="rule-baseline",
+        model_family="rule_based",
+        feature_set="heuristic",
+        notes="Thresholded heuristic over usage growth, feature adoption, and sponsor signals.",
+        hyperparameters={},
+        selected_features=[
+            "usage_growth_90d",
+            "feature_adoption_count",
+            "seat_utilization",
+            "has_exec_sponsor",
+            "previous_expansion",
+            "plan_tier",
+        ],
+        random_seed=None,
     )
 
 
@@ -310,18 +305,17 @@ def run_xgb_tuned_light(splits: SearchSplits) -> FittedCandidate:
     if best_pipeline is None or best_params is None:
         raise RuntimeError("No valid pipeline found during tuning search.")
     chosen_pipeline = best_pipeline
-    return fitted_candidate(
+    return scored_candidate(
         splits,
         SCORING,
-        DemoCandidate(
-            candidate_id="xgb-tuned-light",
-            model_family="xgboost",
-            feature_set="engineered",
-            notes="Light manual sweep across four XGBoost configs, selecting by validation AUC.",
-            hyperparameters=best_params,
-            selected_features=selected_features,
-        ),
         lambda rows: chosen_pipeline.predict_proba(rows[selected_features])[:, 1],
+        candidate_id="xgb-tuned-light",
+        model_family="xgboost",
+        feature_set="engineered",
+        notes="Light manual sweep across four XGBoost configs, selecting by validation AUC.",
+        hyperparameters=best_params,
+        selected_features=selected_features,
+        random_seed=RANDOM_STATE,
     )
 
 

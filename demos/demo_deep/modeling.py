@@ -15,14 +15,9 @@ from sklearn.metrics import (
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from agentic_ml_loop.candidate_result import CandidateRunner, FittedCandidate
-from agentic_ml_loop.splits import SearchSplits
 from demos.common import (
     RANDOM_STATE,
-    DemoCandidate,
-    DemoScoring,
     classification_metrics,
-    fitted_candidate,
 )
 from demos.demo_deep.data import (
     CATEGORICAL_COLUMNS,
@@ -30,8 +25,11 @@ from demos.demo_deep.data import (
     TARGET_COLUMN,
     feature_columns,
 )
+from model_finder.candidate_result import CandidateRunner, FittedCandidate
+from model_finder.candidates import Scoring, scored_candidate
+from model_finder.splits import SearchSplits
 
-SCORING = DemoScoring(TARGET_COLUMN, "val_auc", classification_metrics)
+SCORING = Scoring(TARGET_COLUMN, "val_auc", classification_metrics)
 MAX_EPOCHS = 120
 PATIENCE = 12
 BATCH_SIZE = 128
@@ -171,18 +169,17 @@ def _run_logreg_baseline(splits: SearchSplits) -> FittedCandidate:
         ]
     )
     pipeline.fit(splits.train[cols], splits.train[TARGET_COLUMN])
-    return fitted_candidate(
+    return scored_candidate(
         splits,
         SCORING,
-        DemoCandidate(
-            candidate_id="logreg-baseline",
-            model_family="logistic_regression",
-            feature_set="base",
-            notes="Linear baseline on scaled numeric features and one-hot channel.",
-            hyperparameters={"max_iter": 500, "random_state": RANDOM_STATE, "solver": "lbfgs"},
-            selected_features=cols,
-        ),
         lambda rows: pipeline.predict_proba(rows[cols])[:, 1],
+        candidate_id="logreg-baseline",
+        model_family="logistic_regression",
+        feature_set="base",
+        notes="Linear baseline on scaled numeric features and one-hot channel.",
+        hyperparameters={"max_iter": 500, "random_state": RANDOM_STATE, "solver": "lbfgs"},
+        selected_features=cols,
+        random_seed=RANDOM_STATE,
     )
 
 
@@ -205,27 +202,26 @@ def _run_mlp(
         ),
         MLPArchitecture(hidden_dims=hidden_dims, dropout=dropout),
     )
-    return fitted_candidate(
+    return scored_candidate(
         splits,
         SCORING,
-        DemoCandidate(
-            candidate_id=candidate_id,
-            model_family="pytorch_mlp",
-            feature_set="base",
-            notes=notes,
-            hyperparameters={
-                "hidden_dims": list(hidden_dims),
-                "dropout": dropout,
-                "learning_rate": LEARNING_RATE,
-                "batch_size": BATCH_SIZE,
-                "max_epochs": MAX_EPOCHS,
-                "patience": PATIENCE,
-                "best_epoch": best_epoch,
-                "random_state": RANDOM_STATE,
-            },
-            selected_features=cols,
-        ),
         lambda rows: _predict_proba(model, np.asarray(preprocessor.transform(rows[cols]))),
+        candidate_id=candidate_id,
+        model_family="pytorch_mlp",
+        feature_set="base",
+        notes=notes,
+        hyperparameters={
+            "hidden_dims": list(hidden_dims),
+            "dropout": dropout,
+            "learning_rate": LEARNING_RATE,
+            "batch_size": BATCH_SIZE,
+            "max_epochs": MAX_EPOCHS,
+            "patience": PATIENCE,
+            "best_epoch": best_epoch,
+            "random_state": RANDOM_STATE,
+        },
+        selected_features=cols,
+        random_seed=RANDOM_STATE,
     )
 
 

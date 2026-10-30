@@ -1,7 +1,7 @@
 id: pydantic-extra-forbid
 language: python
 severity: error
-message: A Pydantic model must set extra="forbid", and no subclass may relax it.
+message: 'A Pydantic model must reject unknown fields. Fix: set model_config = ConfigDict(extra="forbid").'
 files:
   - src/**/*.py
   - demos/**/*.py

@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from agentic_ml_loop.io import write_json
-from agentic_ml_loop.results import write_results
-from agentic_ml_loop.runner import ExperimentSeed, init_experiment_dir
-from agentic_ml_loop.spec import get_objective_direction, get_objective_metric
-from agentic_ml_loop.validation import validate_experiment
+from model_finder.io import write_json
+from model_finder.results import write_results
+from model_finder.runner import ExperimentSeed, init_experiment_dir
+from model_finder.spec import get_objective_direction, get_objective_metric
+from model_finder.validation import validate_experiment
 from tests.conftest import SPEC, recorded_result
 
 
@@ -31,7 +31,7 @@ def test_seeded_experiment_is_valid(experiment: Path) -> None:
 def test_missing_directory_and_files_are_reported(experiment: Path, tmp_path: Path) -> None:
     assert "does not exist" in validate_experiment(tmp_path / "absent")[0]
     (experiment / "experiment.md").unlink()
-    assert "Missing required file" in validate_experiment(experiment)[0]
+    assert "required file is missing" in validate_experiment(experiment)[0]
 
 
 def test_invalid_results_are_errors(experiment: Path) -> None:

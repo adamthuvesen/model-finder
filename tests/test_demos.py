@@ -9,10 +9,10 @@ import sys
 
 import pytest
 
-from agentic_ml_loop.splits import temporal_split
 from demos.demo_bootstrap.__main__ import CONFIG as BOOTSTRAP
 from demos.demo_classification.__main__ import CONFIG as CLASSIFICATION
 from demos.demo_regression.__main__ import CONFIG as REGRESSION
+from model_finder.splits import temporal_split
 
 CONFIGS = [BOOTSTRAP, CLASSIFICATION, REGRESSION]
 
@@ -38,7 +38,7 @@ def test_candidate_is_deterministic_and_scores_unseen_rows(config, candidate_id:
 def test_deep_demo_is_deterministic_in_its_own_process() -> None:
     """Torch and the GBDT libraries can deadlock on OpenMP in one process."""
     script = """
-from agentic_ml_loop.splits import temporal_split
+from model_finder.splits import temporal_split
 from demos.demo_deep.__main__ import CONFIG
 search, holdout = temporal_split(CONFIG.rows_loader(7), CONFIG.time_column)
 run = CONFIG.candidate_runners["mlp-shallow"]

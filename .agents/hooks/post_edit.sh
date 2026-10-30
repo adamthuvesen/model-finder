@@ -1,0 +1,1 @@
+../../src/model_finder/hooks/post_edit.sh

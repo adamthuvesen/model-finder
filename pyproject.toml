@@ -1,5 +1,5 @@
 [project]
-name = "agentic-ml-loop"
+name = "model-finder"
 version = "0.1.0"
 description = "Native-goal ML experiment engine with sealed holdouts and a verifiable evidence chain"
 readme = "README.md"
@@ -62,12 +62,12 @@ redshift = [
 ]
 viz = []
 deep = [
-    "agentic-ml-loop[models]",
+    "model-finder[models]",
     "torch>=2.2.0",
 ]
 
 [project.scripts]
-experiment = "agentic_ml_loop.cli.main:main"
+experiment = "model_finder.cli.main:main"
 
 [dependency-groups]
 dev = [
@@ -81,6 +81,7 @@ dev = [
     "pre-commit>=4.0.0",
     "pytest>=8.0",
     "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.11",
     "vulture>=2.16",
     "zizmor>=1.32.0",
@@ -92,15 +93,18 @@ build-backend = "setuptools.build_meta"
 
 [tool.uv]
 package = true
+# A user-level `only-managed` makes uv rebuild .venv on a Python under a custom XDG_DATA_HOME.
+python-preference = "managed"
 default-groups = ["dev"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["agentic_ml_loop*"]
+include = ["model_finder*"]
 
 [tool.setuptools.package-data]
-agentic_ml_loop = [
-    "templates/*.md",
+model_finder = [
+    "templates/*",
+    "hooks/*",
     "viz/renderer/*",
     "viz/templates/*",
     "sources/bundles/*/*",
@@ -125,43 +129,44 @@ select = ["E", "F", "I", "B", "UP", "SIM", "S", "BLE", "TRY", "PTH", "TID", "ANN
 ignore = ["E501", "TRY003", "PLR2004", "PLR0913", "ANN401"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-"anthropic".msg = "No agent SDK. The native goal owns execution."
-"claude_agent_sdk".msg = "No agent SDK. The native goal owns execution."
-"claude_code_sdk".msg = "No agent SDK. The native goal owns execution."
-"openai".msg = "No agent SDK. The native goal owns execution."
-"litellm".msg = "No agent SDK. The native goal owns execution."
-"langchain".msg = "No agent SDK. The native goal owns execution."
-"subprocess".msg = "No process spawn. That is how an agent runner starts."
-"multiprocessing".msg = "No process spawn. That is how an agent runner starts."
-"concurrent.futures.ProcessPoolExecutor".msg = "No process spawn. That is how an agent runner starts."
-"concurrent.futures.process".msg = "No process spawn. That is how an agent runner starts."
-"pty".msg = "No process spawn. That is how an agent runner starts."
-"asyncio.create_subprocess_exec".msg = "No process spawn. That is how an agent runner starts."
-"asyncio.create_subprocess_shell".msg = "No process spawn. That is how an agent runner starts."
-"os.system".msg = "No process spawn. That is how an agent runner starts."
-"os.popen".msg = "No process spawn. That is how an agent runner starts."
-"os.fork".msg = "No process spawn. That is how an agent runner starts."
-"os.forkpty".msg = "No process spawn. That is how an agent runner starts."
-"os.posix_spawn".msg = "No process spawn. That is how an agent runner starts."
-"os.posix_spawnp".msg = "No process spawn. That is how an agent runner starts."
-"os.spawnl".msg = "No process spawn. That is how an agent runner starts."
-"os.spawnv".msg = "No process spawn. That is how an agent runner starts."
-"os.execv".msg = "No process spawn. That is how an agent runner starts."
-"os.execvp".msg = "No process spawn. That is how an agent runner starts."
+"anthropic".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
+"claude_agent_sdk".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
+"claude_code_sdk".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
+"openai".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
+"litellm".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
+"langchain".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
+"subprocess".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"multiprocessing".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"concurrent.futures.ProcessPoolExecutor".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"concurrent.futures.process".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"pty".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"asyncio.create_subprocess_exec".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"asyncio.create_subprocess_shell".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"os.system".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"os.popen".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"os.fork".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"os.forkpty".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"os.posix_spawn".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"os.posix_spawnp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"os.spawnl".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"os.spawnv".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"os.execv".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"os.execvp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["TID251", "S101", "S108", "S603", "S607", "B010", "ANN", "ARG", "PLC0415", "SLF001", "FBT", "T20", "TRY", "PTH123"]
-# One-shot scripts answer only to the banned imports (TID).
-"experiments/*/scripts/**" = ["E", "F", "I", "B", "UP", "SIM", "S", "BLE", "TRY", "PTH", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
+# Experiment code answers only to the banned imports (TID).
+"experiments/**" = ["E", "F", "I", "B", "UP", "SIM", "S", "BLE", "TRY", "PTH", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
 "demos/**" = ["S", "BLE", "TRY", "PTH", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
 # The command line is the one place that prints.
-"src/agentic_ml_loop/cli/*.py" = ["T201"]
+"src/model_finder/cli/*.py" = ["T201"]
+"scripts/**" = ["S603", "TID251", "T201"]
 # Warehouse clients and pyarrow stay optional, so these imports must stay lazy.
-"src/agentic_ml_loop/sources/*.py" = ["PLC0415"]
+"src/model_finder/sources/*.py" = ["PLC0415"]
 
 [tool.ruff.format]
 quote-style = "double"
-exclude = ["experiments/*/scripts/**"]
+exclude = ["experiments/**"]
 
 [tool.basedpyright]
 pythonVersion = "3.13"
@@ -169,9 +174,16 @@ typeCheckingMode = "standard"
 venvPath = "."
 venv = ".venv"
 failOnWarnings = false
-strict = ["src/agentic_ml_loop"]
+strict = ["src/model_finder"]
 include = ["src", "demos", "tests"]
 exclude = ["**/.venv", "**/__pycache__"]
+
+
+[tool.deptry]
+extend_exclude = ["experiments", "examples"]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["catboost", "duckdb", "joblib", "matplotlib", "optuna", "polars", "scipy", "seaborn", "shap", "statsmodels", "tqdm", "adbc-driver-manager", "adbc-driver-postgresql", "adbc-driver-snowflake", "adbc-driver-bigquery", "databricks-sql-connector", "redshift-connector"]
 
 [tool.vulture]
 paths = ["src", "demos"]
@@ -180,6 +192,7 @@ ignore_decorators = ["@model_validator", "@field_validator"]
 # Serialized Pydantic fields, the console script, torch's forward, and the public helpers
 # that experiment scripts call. Vulture sees none of these callers.
 ignore_names = [
+    "random_seed", "Candidates", "classification", "regression",
     "nondeterministic_reason",
     "holdout_rows", "exploratory_reasons", "label",
     "validate_label_dates",
@@ -189,59 +202,55 @@ ignore_names = [
     "acknowledged_prior_holdouts", "forward", "main", "outputs_dir", "work_dir", "scripts_dir", "save_completion",
 ]
 
-[tool.deptry]
-extend_exclude = ["experiments", "examples"]
-
-[tool.deptry.per_rule_ignores]
-DEP002 = ["catboost", "duckdb", "joblib", "matplotlib", "optuna", "polars", "scipy", "seaborn", "shap", "statsmodels", "tqdm", "adbc-driver-manager", "adbc-driver-postgresql", "adbc-driver-snowflake", "adbc-driver-bigquery", "databricks-sql-connector", "redshift-connector"]
-
 [tool.importlinter]
-root_packages = ["agentic_ml_loop", "demos"]
+root_packages = ["model_finder", "demos"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 id = "engine-independent-of-demos"
-name = "The engine never imports demos"
+name = "The engine never imports demos. Fix: pass demo objects in through RunnerConfig."
 type = "forbidden"
-source_modules = ["agentic_ml_loop"]
+source_modules = ["model_finder"]
 forbidden_modules = ["demos"]
 
 [[tool.importlinter.contracts]]
 id = "engine-layers"
-name = "CLI above domain above I/O"
+name = "CLI above domain above I/O. Fix: move the import up a layer, or pass the value in as an argument."
 type = "layers"
-containers = ["agentic_ml_loop"]
+containers = ["model_finder"]
 exhaustive = true
 layers = [
     "cli",
     "completion : viz",
+    "labels : rebuild : reseal",
     "final_evaluation : runner",
     "data_audit : validation",
     "sources",
     "run_evidence : holdout : spec",
     "results : ledger",
-    "candidate_result",
+    "candidates",
+    "candidate_result : metrics",
     "splits : feature_provenance",
     "io : paths",
 ]
 
 [[tool.importlinter.contracts]]
 id = "demos-cannot-reach-holdout-store"
-name = "Demos do not import the holdout store"
+name = "Demos do not import the holdout store. Fix: score holdout rows through score_rows and evaluate-final."
 type = "forbidden"
 source_modules = ["demos"]
-forbidden_modules = ["agentic_ml_loop.holdout", "agentic_ml_loop.ledger", "agentic_ml_loop.final_evaluation"]
+forbidden_modules = ["model_finder.holdout", "model_finder.ledger", "model_finder.final_evaluation"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 id = "no-agent-runtime"
-name = "The engine and demos import no agent SDK"
+name = "The engine and demos import no agent SDK. Fix: remove the import, because the native goal runs the agent."
 type = "forbidden"
-source_modules = ["agentic_ml_loop", "demos"]
+source_modules = ["model_finder", "demos"]
 forbidden_modules = ["anthropic", "openai", "claude_agent_sdk", "claude_code_sdk", "langchain", "litellm"]
 
 [tool.coverage.run]
-source = ["agentic_ml_loop", "demos"]
+source = ["model_finder", "demos"]
 
 [tool.coverage.report]
 precision = 2

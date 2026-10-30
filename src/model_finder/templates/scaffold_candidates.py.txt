@@ -1,0 +1,31 @@
+"""Candidates for __SLUG__. One function is one candidate. The engine records the rest.
+
+A candidate gets train and validation rows and returns a function that predicts.
+The function that predicts never receives the target column.
+Add one with `experiment candidate new <name>`, or write a function here.
+"""
+
+import numpy as np
+import pandas as pd
+
+from model_finder.candidates import Candidates, Predict, Scoring
+from model_finder.splits import SearchSplits
+
+# CHANGE: the column to predict.
+TARGET = __TARGET__
+# CHANGE: add ID columns and anything unknown at prediction time.
+NOT_FEATURES = __NOT_FEATURES__
+# CHANGE: Scoring(...) takes your own metric.
+candidates = Candidates(Scoring.__KIND__(TARGET))
+
+
+def _features(rows: pd.DataFrame) -> pd.DataFrame:
+    kept = rows.drop(columns=NOT_FEATURES, errors="ignore")
+    return kept.select_dtypes("number").fillna(0.0)
+
+
+@candidates.add
+def baseline(splits: SearchSplits) -> Predict:
+    """Predict the train mean for every row."""
+    mean = float(splits.train[TARGET].mean())
+    return lambda rows: np.full(len(rows), mean)

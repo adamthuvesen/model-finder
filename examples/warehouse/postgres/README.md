@@ -32,7 +32,7 @@ checks it against the manifest:
 ```python
 from pathlib import Path
 
-from agentic_ml_loop.sources import read_snapshot
+from model_finder.sources import read_snapshot
 
 EXPERIMENT_DIR = Path("experiments/<your_experiment>")
 

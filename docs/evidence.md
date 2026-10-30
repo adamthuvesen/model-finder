@@ -1,1 +1,1 @@
-../src/agentic_ml_loop/contract/evidence.md
+../src/model_finder/contract/evidence.md
