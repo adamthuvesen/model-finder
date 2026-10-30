@@ -78,5 +78,5 @@ Cite each check as `path::name`. `tests/test_agents_table.py` fails unless that 
 | A reported gap and interval match the metrics | `src/model_finder/candidate_result.py::_gap_matches_metrics`, `src/model_finder/candidate_result.py::_interval_declares_bootstrap_count` | 2026-11-04 | Only when reported |
 | Models reject unknown fields | `rules/pydantic-extra-forbid.yml::pydantic-extra-forbid` | 2026-11-04 | Lint |
 | CLI above domain above I/O, and the engine never imports demos | `pyproject.toml::tool.importlinter.contracts.engine-layers`, `pyproject.toml::tool.importlinter.contracts.engine-independent-of-demos` | 2026-11-04 | Imports only |
-| Code passes strict types, and the engine has no dead code | `pyproject.toml::tool.basedpyright.typeCheckingMode`, `scripts/baseline_ratchet.py::main`, `Makefile::dead` | 2026-11-04 | Vulture counts every Pydantic field as used. The baseline holds 23 sklearn stub errors and may not grow |
+| Code passes strict types, and the engine has no dead code | `pyproject.toml::tool.basedpyright.typeCheckingMode`, `Makefile::dead` | 2026-11-04 | Vulture counts every Pydantic field as used. basedpyright has no baseline file, so every type error fails `make types` |
 | A verify pass needs a control that observes FAIL | `.agents/skills/verify-model-finder/verify::run_control` | 2026-11-06 | One drive's exit-code check |

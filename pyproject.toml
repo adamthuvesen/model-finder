@@ -123,7 +123,7 @@ line-length = 100
 target-version = "py314"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP", "SIM", "S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH", "PGH003"]
 # Line length is enforced by the formatter; don't nag about unsplittable
 # strings, URLs, and f-strings.
 ignore = ["E501", "TRY003", "PLR2004", "PLR0913", "PLR0917", "ANN401"]
@@ -173,6 +173,7 @@ exclude = ["experiments/**"]
 [tool.basedpyright]
 pythonVersion = "3.14"
 typeCheckingMode = "strict"
+enableTypeIgnoreComments = false
 venvPath = "."
 venv = ".venv"
 failOnWarnings = false

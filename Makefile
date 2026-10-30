@@ -46,7 +46,7 @@ lint:
 
 types:
 	$(RUN) basedpyright --level error
-	$(RUN) python scripts/baseline_ratchet.py
+	$(RUN) basedpyright --level error --project .agents/skills/verify-model-finder
 
 boundaries:
 	$(RUN) lint-imports
