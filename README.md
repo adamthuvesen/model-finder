@@ -50,7 +50,7 @@ without running anything.
 
 ```bash
 uv run experiment new churn --csv rows.csv --target label   # prints a first leaderboard
-uv run experiment candidate new gbdt                        # adds one small function to experiments/churn/model/candidates.py
+uv run experiment candidate new gbdt --experiment experiments/churn  # adds a function to candidates.py
 uv run python experiments/churn/model/run.py run-candidate --candidate gbdt
 uv run experiment next                                      # says what could come next
 ```
@@ -100,7 +100,7 @@ Each `init-demo` generates new rows, so you can run a demo as many times as you 
 Pull once from Snowflake, BigQuery, Redshift, Databricks, Postgres, or DuckDB, then run offline.
 
 ```bash
-uv sync --extra postgres              # or: snowflake | bigquery | databricks | redshift
+uv sync --extra models                # DuckDB; for others use postgres | snowflake | bigquery | databricks | redshift
 uv run experiment sources list
 uv run experiment pull --experiment experiments/<id> --source duckdb \
   --database path/to.duckdb --query "SELECT * FROM events ORDER BY id"

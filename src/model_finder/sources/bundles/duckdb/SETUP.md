@@ -1,7 +1,7 @@
 # DuckDB source
 
-Tier-0 and fully creds-free. Use it to prove the ingestion path end to end with
-no server and no credentials. It is also the bundled demo source.
+Use DuckDB to test ingestion without a server or credentials. Provide a local database
+and an existing experiment for the example below.
 
 ## Install
 
@@ -30,6 +30,6 @@ column; the value is recorded in the manifest for provenance.
 uv run experiment pull \
   --experiment experiments/demo_warehouse \
   --source duckdb \
-  --database src/model_finder/sources/bundles/duckdb/demo.duckdb \
+  --database path/to/events.duckdb \
   --query "SELECT * FROM events ORDER BY snapshot_date"
 ```

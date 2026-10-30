@@ -1,9 +1,7 @@
 # Google BigQuery source
 
-Bulk extract via ADBC. The ADBC BigQuery driver is **experimental** (may need
-`ADBC_BIGQUERY_LIBRARY` set to the native lib path); if the install is fussy in
-your environment, the native `google-cloud-bigquery[bqstorage].to_arrow()` is a
-drop-in fallback behind the same extractor contract.
+Bulk extract uses the experimental ADBC BigQuery driver. It may need
+`ADBC_BIGQUERY_LIBRARY` set to the native library path.
 
 ## Install
 

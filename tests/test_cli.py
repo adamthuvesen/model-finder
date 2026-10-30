@@ -324,7 +324,15 @@ def test_setup_merges_the_deny_rule_and_keeps_other_settings(tmp_path: Path, cap
 
 
 @pytest.mark.parametrize(
-    "content", ["not json", "[]", '{"permissions": []}', '{"permissions": {"deny": "x"}}']
+    "content",
+    [
+        "not json",
+        "[]",
+        '{"permissions": []}',
+        '{"permissions": {"deny": "x"}}',
+        '{"permissions": {"deny": [3]}}',
+        '{"model": "x", "permissions": {"deny": ["Read(./.env)", null]}}',
+    ],
 )
 def test_setup_refuses_settings_it_cannot_merge(tmp_path: Path, content: str, capsys) -> None:
     settings_path = tmp_path / ".claude" / "settings.json"
@@ -332,7 +340,20 @@ def test_setup_refuses_settings_it_cannot_merge(tmp_path: Path, content: str, ca
     settings_path.write_text(content)
     assert main(["setup", "--repo", str(tmp_path)]) == 1
     assert settings_path.read_text() == content
-    assert "Cannot add holdout deny rules" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "Cannot add holdout deny rules" in captured.err
+    assert str(settings_path) in captured.err
+    assert "Fix:" in captured.err
+    assert "Traceback" not in captured.err
+    assert captured.out == ""
+    if '"deny": [3]' in content:
+        assert "permissions.deny[0] must be a string" in captured.err
+    if "null" in content:
+        assert "permissions.deny[1] must be a string" in captured.err
+    assert sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*")) == [
+        ".claude",
+        ".claude/settings.json",
+    ]
     assert not (tmp_path / ".agents").exists()
 
 

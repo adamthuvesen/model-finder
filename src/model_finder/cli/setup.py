@@ -131,9 +131,15 @@ def _deny_holdout_store(repo_root: Path) -> list[str]:
     deny = _member(_member(settings, "permissions", {}), "deny", [])
     if not isinstance(deny, list):
         raise TypeError(
-            f"{path}: Cannot add holdout deny rules: permissions.deny must be a list in an object. "
-            "Fix: repair that key, then run setup"
+            f"{path}: Cannot add holdout deny rules: permissions.deny must be a list of strings "
+            "in an object. Fix: repair that key, then run setup"
         )
+    for index, rule in enumerate(cast("list[object]", deny)):
+        if not isinstance(rule, str):
+            raise TypeError(
+                f"{path}: Cannot add holdout deny rules: permissions.deny[{index}] must be "
+                "a string. Fix: write that deny rule as a string, then run setup"
+            )
     rules = cast("list[str]", deny)
     kept = [
         rule
