@@ -9,13 +9,6 @@ import pandas as pd
 
 from agentic_ml_loop.cli.main import main as experiment_main
 from agentic_ml_loop.cli.runner import run_runner_main
-from agentic_ml_loop.completion import (
-    CompletionRecord,
-    ResearchReview,
-    evidence_file,
-    save_completion,
-)
-from agentic_ml_loop.io import write_json
 from demos.demo_bootstrap.__main__ import CONFIG
 
 
@@ -23,45 +16,41 @@ def _demo(*arguments: str) -> int:
     return run_runner_main(CONFIG, list(arguments))
 
 
-def _record_reviewed_conclusion(experiment: Path) -> None:
-    for name, text in (
-        ("report.md", "logreg-tiny beats the majority baseline on validation AUC."),
-        ("reproduce.md", "Run the commands in README.md."),
-    ):
-        (experiment / "outputs" / name).write_text(text)
-    refs = {
-        "specification": evidence_file(experiment, "experiment.md"),
-        "results": evidence_file(experiment, "results.json"),
-        "report": evidence_file(experiment, "outputs/report.md"),
-        "evaluation": evidence_file(experiment, "outputs/final_evaluation.json"),
-        "reproduction": evidence_file(experiment, "outputs/reproduce.md"),
-    }
-    review = ResearchReview(
-        reviewer="test reviewer",
-        verdict="accepted",
-        specification_sha256=refs["specification"].sha256,
-        results_sha256=refs["results"].sha256,
-        report_sha256=refs["report"].sha256,
-        evaluation_sha256=refs["evaluation"].sha256,
-        findings=[],
-        limitations=["Synthetic data."],
+def _record_reviewed_conclusion(path: str) -> int:
+    """Follow the research skill: write the report, then run its two record commands."""
+    report_args = ["--report", "outputs/report.md", "--limitation", "Synthetic data."]
+    outputs = Path(path) / "outputs"
+    (outputs / "report.md").write_text("logreg-tiny beats the majority baseline.")
+    (outputs / "reproduce.md").write_text("Run the commands in README.md.")
+    reviewed = experiment_main(
+        [
+            "record-review",
+            "--experiment",
+            path,
+            "--reviewer",
+            "test reviewer",
+            "--verdict",
+            "accepted",
+            *report_args,
+        ]
     )
-    write_json(experiment / "outputs/review.json", review.model_dump())
-    save_completion(
-        experiment,
-        CompletionRecord(
-            outcome="supported",
-            conclusion="logreg-tiny beats the baseline on search rows.",
-            limitations=["Synthetic data."],
-            selected_candidate_id="logreg-tiny",
-            baseline_candidate_id="majority-baseline",
-            review=evidence_file(experiment, "outputs/review.json"),
-            specification=refs["specification"],
-            results=refs["results"],
-            report=refs["report"],
-            evaluation=refs["evaluation"],
-            reproduction=refs["reproduction"],
-        ),
+    return reviewed or experiment_main(
+        [
+            "record-completion",
+            "--experiment",
+            path,
+            "--outcome",
+            "supported",
+            "--conclusion",
+            "logreg-tiny beats the baseline on search rows.",
+            "--selected",
+            "logreg-tiny",
+            "--baseline",
+            "majority-baseline",
+            "--reproduction",
+            "outputs/reproduce.md",
+            *report_args,
+        ]
     )
 
 
@@ -98,10 +87,18 @@ def test_demo_runs_from_search_to_reviewed_completion(tmp_path: Path, capsys) ->
     assert workspace_rows == 640
 
     assert experiment_main(["complete-check", path]) == 1
-    _record_reviewed_conclusion(experiment)
+    assert _record_reviewed_conclusion(path) == 0
     assert experiment_main(["validate", path]) == 0
     assert experiment_main(["complete-check", path]) == 0
 
     replay = tmp_path / "replay.html"
     assert experiment_main(["replay", path, "--output", str(replay)]) == 0
     assert "logreg-tiny" in replay.read_text()
+
+    capsys.readouterr()
+    final_path = experiment / "outputs/final_evaluation.json"
+    edited = json.loads(final_path.read_text())
+    edited["metrics"]["auc"] = 0.999
+    final_path.write_text(json.dumps(edited))
+    assert experiment_main(["complete-check", path]) == 1
+    assert "Stale evaluation" in capsys.readouterr().err

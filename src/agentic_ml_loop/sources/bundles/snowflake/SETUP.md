@@ -11,23 +11,16 @@ uv sync --extra snowflake   # adbc-driver-snowflake + manager + pyarrow
 
 ## Auth (keyless local)
 
-Use a **named connection** in `~/.snowflake/connections.toml` (shared with the
-Snowflake CLI) with browser SSO. Nothing secret belongs in the repo:
+Pass connection values with repeated `--conn key=value` flags. The engine reads no
+connection file. Use browser SSO for local work. Nothing secret belongs in the repo:
 
-```toml
-[ml_ro]
-account = "myorg-myacct"
-user = "you@example.com"
-authenticator = "externalbrowser"
-role = "ANALYST_RO"
-warehouse = "WH_XS"
-database = "ANALYTICS"
-schema = "MART"
+```bash
+--conn account=myorg-myacct --conn user=you@example.com \
+--conn authenticator=externalbrowser --conn role=ANALYST_RO \
+--conn warehouse=WH_XS --conn database=ANALYTICS --conn schema=MART
 ```
 
-Pass the connection via `--conn` db_kwargs (account/user/authenticator/role/...),
-or wire the connector to read the named connection. Key-pair auth is the
-unattended/CI option (private key outside the repo).
+Use key-pair auth for unattended runs, with the private key outside the repo.
 
 ## Read-only grant (the real guarantee)
 

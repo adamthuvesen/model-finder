@@ -3,9 +3,9 @@
 Thresholds come from the removed ``lib/evaluation_review.py``: a 0.05 target-rate shift for a
 binary target, 0.5 train standard deviations otherwise, and a scaled feature mean shift of 1.0.
 
-Overlap counts use plain value comparison. A column whose type differs between frames is not
-comparable, and the report says so instead of guessing. A count of zero does not prove the rows
-are unrelated.
+Overlap counts use plain value comparison. Numeric columns compare by value across int and float.
+Any other type difference makes a check not comparable, and the report names it. A count of zero
+does not prove the rows are unrelated.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ class DataAudit(BaseModel):
 
 
 class OverlapReport(BaseModel):
-    """Rows shared between splits. ``None`` means the frames cannot be compared by plain value."""
+    """Rows shared between splits. ``None`` means undeclared keys or a listed failed comparison."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -41,10 +41,11 @@ class OverlapReport(BaseModel):
     search_holdout_exact_rows: int | None
     train_validation_keys: int | None
     search_holdout_keys: int | None
+    not_comparable: list[str]
 
     @property
-    def shares_rows(self) -> bool:
-        return any(
+    def needs_acknowledgement(self) -> bool:
+        return bool(self.not_comparable) or any(
             (
                 self.train_validation_exact_rows,
                 self.search_holdout_exact_rows,
@@ -87,10 +88,15 @@ def _feature_drift_concerns(search: SearchSplits, target_column: str) -> list[st
     return concerns
 
 
-def audit_search_splits(search: SearchSplits, target_column: str) -> DataAudit:
+def audit_search_splits(
+    search: SearchSplits, target_column: str, key_columns: list[str]
+) -> DataAudit:
     """Report target and feature drift between train and validation. Reads no holdout rows."""
     if target_column not in search.train.columns:
         raise ValueError(f"Target column is missing from search rows: {target_column}")
+    missing_keys = [column for column in key_columns if column not in search.train.columns]
+    if missing_keys:
+        raise ValueError(f"key_columns names columns that search rows lack: {missing_keys}")
     train_target = pd.to_numeric(search.train[target_column], errors="coerce").dropna()
     validation_target = pd.to_numeric(search.validation[target_column], errors="coerce").dropna()
     shift = target_shift_concern(train_target, validation_target, "validation")
@@ -102,11 +108,16 @@ def audit_search_splits(search: SearchSplits, target_column: str) -> DataAudit:
     )
 
 
+def _comparable(left: pd.Series, right: pd.Series) -> bool:
+    both_numeric = pd.api.types.is_numeric_dtype(left) and pd.api.types.is_numeric_dtype(right)
+    return both_numeric or left.dtype == right.dtype
+
+
 def _shared_rows(left: pd.DataFrame, right: pd.DataFrame, columns: list[str]) -> int | None:
     """Count distinct left rows found in right, or None when the frames are not comparable."""
-    if not columns or any(c not in left.columns or c not in right.columns for c in columns):
+    if any(c not in left.columns or c not in right.columns for c in columns):
         return None
-    if any(left[c].dtype != right[c].dtype for c in columns):
+    if not all(_comparable(left[c], right[c]) for c in columns):
         return None
     return len(left[columns].drop_duplicates().merge(right[columns].drop_duplicates(), on=columns))
 
@@ -116,10 +127,27 @@ def overlap_report(
 ) -> OverlapReport:
     search_rows = pd.concat([search.train, search.validation], ignore_index=True)
     all_columns = [str(column) for column in search.train.columns]
+    counts = {
+        "train_validation_exact_rows": _shared_rows(search.train, search.validation, all_columns),
+        "search_holdout_exact_rows": _shared_rows(search_rows, holdout.holdout, all_columns),
+    }
+    if key_columns:
+        # A missing key identifies nothing, so NaN keys never count as shared.
+        counts["train_validation_keys"] = _shared_rows(
+            search.train.dropna(subset=key_columns),
+            search.validation.dropna(subset=key_columns),
+            key_columns,
+        )
+        counts["search_holdout_keys"] = _shared_rows(
+            search_rows.dropna(subset=key_columns),
+            holdout.holdout.dropna(subset=[c for c in key_columns if c in holdout.holdout.columns]),
+            key_columns,
+        )
     return OverlapReport(
         key_columns=key_columns,
-        train_validation_exact_rows=_shared_rows(search.train, search.validation, all_columns),
-        search_holdout_exact_rows=_shared_rows(search_rows, holdout.holdout, all_columns),
-        train_validation_keys=_shared_rows(search.train, search.validation, key_columns),
-        search_holdout_keys=_shared_rows(search_rows, holdout.holdout, key_columns),
+        train_validation_exact_rows=counts["train_validation_exact_rows"],
+        search_holdout_exact_rows=counts["search_holdout_exact_rows"],
+        train_validation_keys=counts.get("train_validation_keys"),
+        search_holdout_keys=counts.get("search_holdout_keys"),
+        not_comparable=[name for name, count in counts.items() if count is None],
     )

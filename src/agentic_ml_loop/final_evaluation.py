@@ -32,10 +32,12 @@ from agentic_ml_loop.holdout import (
     history_seals,
     load_sealed_holdout,
     load_search_splits,
+    place_staged_file,
     read_holdout_seal,
+    refuse_known_file,
+    remove_other_sealed_files,
     require_history_in_ledger,
-    seal_replacement_rows,
-    sealed_file_path,
+    stage_replacement_rows,
     verify_sealed_holdout,
 )
 from agentic_ml_loop.io import file_sha256, json_text, read_text, utc_now, write_json
@@ -44,9 +46,16 @@ from agentic_ml_loop.ledger import (
     ProvenanceNote,
     claim_for_evaluation,
     entries_for,
+    record_final,
     record_retirement,
 )
-from agentic_ml_loop.paths import ATTEMPT_PATH, FINAL_PATH, HOLDOUT_HISTORY_DIR, SELECTION_PATH
+from agentic_ml_loop.paths import (
+    ATTEMPT_PATH,
+    FINAL_PATH,
+    HOLDOUT_HISTORY_DIR,
+    SELECTION_PATH,
+    repository_relative_path,
+)
 from agentic_ml_loop.results import (
     RecordedResult,
     comparison_errors,
@@ -152,7 +161,9 @@ def freeze_candidate(
             raise ValueError(f"Expected one candidate named {candidate_id}")
         selected = matches[0]
         _raise_errors(validate_run_evidence(experiment_dir, selected))
-        audit = audit_search_splits(load_search_splits(experiment_dir), target_column)
+        audit = audit_search_splits(
+            load_search_splits(experiment_dir), target_column, get_key_columns(experiment_dir)
+        )
         selection = FrozenSelection(
             selected_result=selected,
             results_sha256=results_sha256(experiment_dir),
@@ -182,20 +193,43 @@ def _load_selection(experiment_dir: Path) -> FrozenSelection:
         raise ValueError("Results changed after selection was frozen")
     if not recorded_fingerprint_is_current(experiment_dir, selection.code_fingerprint):
         raise ValueError("Runtime code changed after selection was frozen")
+    if search_data_identity(load_search_splits(experiment_dir)) != (
+        selection.selected_result.comparison_context.data
+    ):
+        raise ValueError("Search data changed after selection was frozen")
     return selection
 
 
-def _require_ledger_chain(final: FinalEvaluation, attempt_sha256: str) -> None:
-    """A read leaves a ledger entry first. Final evidence without one was not made by the engine."""
+def _require_ledger_chain(
+    experiment_dir: Path, final: FinalEvaluation, attempt_sha256: str
+) -> None:
+    """The engine records a read and its final file's hash. Other evidence was not made by it."""
     if final.attempt_sha256 != attempt_sha256:
         raise ValueError("Final evidence does not chain to the attempt file")
-    if not any(
-        entry.event == "evaluated"
-        and entry.experiment_uid == final.holdout.experiment_uid
-        and entry.attempt_sha256 == attempt_sha256
+    entries = [
+        entry
         for entry in entries_for(final.holdout.holdout_sha256)
+        if entry.experiment_uid == final.holdout.experiment_uid
+    ]
+    if not any(
+        entry.event == "evaluated" and entry.attempt_sha256 == attempt_sha256 for entry in entries
     ):
         raise ValueError("The ledger has no evaluation of this holdout that matches the attempt")
+    final_sha256 = file_sha256(experiment_dir / FINAL_PATH)
+    finalized = [
+        entry
+        for entry in entries
+        if entry.event == "finalized"
+        and entry.attempt_sha256 == attempt_sha256
+        and entry.final_sha256 == final_sha256
+    ]
+    if not finalized:
+        raise ValueError("The ledger has no record of this final file. It was edited or forged.")
+    if finalized[0].experiment_path != repository_relative_path(experiment_dir):
+        raise ValueError(
+            f"This evidence was produced in {finalized[0].experiment_path}. "
+            "Evidence does not carry over when an experiment is copied to another directory."
+        )
 
 
 def load_verified_final(experiment_dir: Path) -> tuple[FrozenSelection, FinalEvaluation]:
@@ -224,7 +258,7 @@ def _completed_evaluation(
         or final.selection_metrics != selection.selected_result.metrics
     ):
         raise ValueError("Final evidence does not match the frozen selection or its attempt")
-    _require_ledger_chain(final, file_sha256(experiment_dir / ATTEMPT_PATH))
+    _require_ledger_chain(experiment_dir, final, file_sha256(experiment_dir / ATTEMPT_PATH))
     return final
 
 
@@ -285,6 +319,7 @@ def evaluate_final(
                 event="evaluated",
                 experiment_uid=seal.experiment_uid,
                 experiment_name=experiment_dir.resolve().name,
+                experiment_path=repository_relative_path(experiment_dir),
                 attempt_sha256=attempt_sha256,
                 recorded_at=utc_now(),
             )
@@ -322,7 +357,20 @@ def evaluate_final(
                 "The seal stops honest and shortest-path agents. It does not stop a deliberate one.",
             ],
         )
-        write_json(final_path, final.model_dump(mode="json"))
+        final_payload = final.model_dump(mode="json")
+        record_final(
+            LedgerEntry(
+                holdout_sha256=seal.holdout_sha256,
+                event="finalized",
+                experiment_uid=seal.experiment_uid,
+                experiment_name=experiment_dir.resolve().name,
+                experiment_path=repository_relative_path(experiment_dir),
+                attempt_sha256=attempt_sha256,
+                final_sha256=hashlib.sha256(json_text(final_payload).encode()).hexdigest(),
+                recorded_at=utc_now(),
+            )
+        )
+        write_json(final_path, final_payload)
         return final
 
 
@@ -344,37 +392,50 @@ def reseal_holdout(experiment_dir: Path, rows: pd.DataFrame, provenance_note: st
     """Retire the current holdout, seal new rows, and reopen search.
 
     A holdout that was read cannot be made unbiased again. This records that fact with a required
-    note. The ledger entry comes first: from then on evaluation refuses the old file, so a crash
-    before the new seal commits leaves no holdout that can be read. A retry resumes.
+    note. All validation runs before the first change, so a refused reseal costs nothing. The
+    ledger entry is the first change: from then on evaluation refuses the old file. A retry after
+    a crash resumes. A retry after the new seal committed finds those rows live and does nothing.
     """
     if not experiment_dir.is_dir():
         raise FileNotFoundError(f"Experiment directory does not exist: {experiment_dir}")
     with results_lock(experiment_dir):
-        retired = read_holdout_seal(experiment_dir)
+        live = read_holdout_seal(experiment_dir)
         record = ConsumedHoldout(
-            holdout=retired,
+            holdout=live,
             provenance_note=provenance_note,
             exploratory_run_ids=[result.run_id for result in load_results(experiment_dir)],
             resealed_at=utc_now(),
         )
         require_history_in_ledger(experiment_dir)
         check_replacement_rows(experiment_dir, rows)
+        seal, staged = stage_replacement_rows(experiment_dir, live, rows)
+        if seal == live and not entries_for(live.holdout_sha256):
+            staged.unlink(missing_ok=True)
+            remove_other_sealed_files(live)
+            return live
+        try:
+            refuse_known_file(seal.holdout_sha256)
+        except ValueError:
+            staged.unlink(missing_ok=True)
+            raise
+
         record_retirement(
             LedgerEntry(
-                holdout_sha256=retired.holdout_sha256,
+                holdout_sha256=live.holdout_sha256,
                 event="retired",
-                experiment_uid=retired.experiment_uid,
+                experiment_uid=live.experiment_uid,
                 experiment_name=experiment_dir.resolve().name,
+                experiment_path=repository_relative_path(experiment_dir),
                 provenance_note=provenance_note,
                 recorded_at=utc_now(),
             )
         )
         retired_before = history_seals(experiment_dir)
-        if not retired_before or retired_before[-1] != retired.holdout_sha256:
+        if live.holdout_sha256 not in retired_before:
             _write_history(experiment_dir, len(retired_before) + 1, record)
         for relative in (SELECTION_PATH, ATTEMPT_PATH, FINAL_PATH):
             (experiment_dir / relative).unlink(missing_ok=True)
-        seal = seal_replacement_rows(experiment_dir, retired, rows)
+        place_staged_file(seal, staged)
         commit_seal(experiment_dir, seal)
-        sealed_file_path(retired).unlink(missing_ok=True)
+        remove_other_sealed_files(seal)
         return seal

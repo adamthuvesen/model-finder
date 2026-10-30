@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import re
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from agentic_ml_loop.cli.main import main
+from agentic_ml_loop.cli.main import CONTRACT_DOCUMENTS, main
 from agentic_ml_loop.cli.runner import RunnerConfig, run_runner_main
+from agentic_ml_loop.cli.setup import PACKAGED_SKILLS
+from agentic_ml_loop.holdout import load_search_splits
+from agentic_ml_loop.ledger import store_root
 from agentic_ml_loop.paths import DATA_DIRNAME
 from agentic_ml_loop.runner import ExperimentSeed
 from agentic_ml_loop.sources import SnapshotFreezeRequest, freeze_snapshot
@@ -17,6 +24,7 @@ def _config(code_root: Path) -> RunnerConfig:
         seed=ExperimentSeed("experiment"),
         candidate_runners={"candidate-a": fitted},
         rows_loader=lambda seed: rows(seed=seed),
+        rows_source=None,
         time_column="when",
         target_column="label",
         code_root=code_root,
@@ -182,3 +190,182 @@ def test_driver_error_is_one_line_without_a_traceback(tmp_path: Path, capsys) ->
 def test_sources_list_runs_offline(capsys) -> None:
     assert main(["sources", "list"]) == 0
     assert "duckdb" in capsys.readouterr().out
+
+
+def _skill_files() -> list[Path]:
+    return [path for path in PACKAGED_SKILLS.rglob("*.md") if path.is_file()]
+
+
+def test_setup_links_packaged_skills_and_keeps_local_ones(tmp_path: Path, capsys) -> None:
+    local = tmp_path / ".agents" / "skills" / "research"
+    local.mkdir(parents=True)
+    assert main(["setup", "--repo", str(tmp_path)]) == 0
+    assert "kept local skill research" in capsys.readouterr().out
+    assert not local.is_symlink()
+    link = tmp_path / ".claude" / "skills" / "experiment-spec" / "SKILL.md"
+    assert link.read_text().startswith("---\nname: experiment-spec")
+    assert not (tmp_path / ".agents/skills/experiment-spec").readlink().is_absolute()
+
+
+def test_second_setup_changes_nothing(tmp_path: Path, capsys) -> None:
+    assert main(["setup", "--repo", str(tmp_path)]) == 0
+    capsys.readouterr()
+    assert main(["setup", "--repo", str(tmp_path)]) == 0
+    assert capsys.readouterr().out == "nothing to do\n"
+
+
+def test_setup_replaces_a_link_to_an_older_install(tmp_path: Path) -> None:
+    skills = tmp_path / ".agents" / "skills"
+    skills.mkdir(parents=True)
+    (skills / "research").symlink_to("../../old/agentic_ml_loop/skills/research")
+    assert main(["setup", "--repo", str(tmp_path)]) == 0
+    assert (skills / "research" / "SKILL.md").is_file()
+
+
+@pytest.mark.parametrize("document", sorted(CONTRACT_DOCUMENTS))
+def test_contract_prints_each_packaged_document(document: str, capsys) -> None:
+    assert main(["contract", document]) == 0
+    assert capsys.readouterr().out.startswith("#")
+
+
+def test_packaged_skills_need_no_checkout() -> None:
+    needs_checkout = re.compile(r"\.\./\.\./|src/agentic_ml_loop|\]\(docs/|\]\(demos/")
+    assert [path.name for path in _skill_files() if needs_checkout.search(path.read_text())] == []
+
+
+def test_seal_names_the_local_file_that_keeps_the_rows(
+    tmp_path: Path, code_root: Path, capsys
+) -> None:
+    source = tmp_path / "rows.csv"
+    config = replace(_config(code_root), rows_source=source)
+    assert run_runner_main(config, ["init-demo", "--experiment", str(tmp_path / "e")]) == 0
+    assert f"stay readable in {source}" in capsys.readouterr().err
+
+
+def test_seal_with_no_local_file_does_not_warn(tmp_path: Path, code_root: Path, capsys) -> None:
+    assert (
+        run_runner_main(_config(code_root), ["init-demo", "--experiment", str(tmp_path / "e")]) == 0
+    )
+    assert "stay readable" not in capsys.readouterr().err
+
+
+def test_reseal_names_the_rows_file(scored: Path, tmp_path: Path, capsys) -> None:
+    source = tmp_path / "new_rows.parquet"
+    rows(count=12, seed=99, start="2026-06-01").to_parquet(source, index=False)
+    arguments = ["reseal", "--experiment", str(scored), "--rows", str(source), "--note", "New."]
+    assert main(arguments) == 0
+    assert "stay readable in" in capsys.readouterr().err
+
+
+def _provenance(artifact: Path, label_date: str) -> None:
+    artifact.write_text("feature\nsignal\n")
+    (artifact.parent / "feature_selection_provenance.json").write_text(
+        json.dumps(
+            {
+                artifact.name: {
+                    "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+                    "label_dates": [label_date],
+                }
+            }
+        )
+    )
+
+
+def test_check_features_reads_dates_from_search_rows(sealed: Path, capsys) -> None:
+    artifact = sealed / "work" / "ranked.csv"
+    splits = load_search_splits(sealed)
+    arguments = [
+        "check-features",
+        "--experiment",
+        str(sealed),
+        "--artifact",
+        str(artifact),
+        "--time-column",
+        "when",
+    ]
+    _provenance(artifact, splits.train["when"].iloc[0].strftime("%Y-%m-%d"))
+    assert main(arguments) == 0
+    _provenance(artifact, splits.validation["when"].iloc[0].strftime("%Y-%m-%d"))
+    assert main(arguments) == 1
+    assert "validation or holdout labels" in capsys.readouterr().err
+    _provenance(artifact, "2031-01-01")
+    assert main(arguments) == 1
+    assert "outside selection training dates" in capsys.readouterr().err
+    assert main([*arguments[:-1], "absent"]) == 1
+    assert "Time column is missing" in capsys.readouterr().err
+
+
+def test_setup_merges_the_deny_rule_and_keeps_other_settings(tmp_path: Path, capsys) -> None:
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_path.parent.mkdir()
+    settings_path.write_text(
+        json.dumps({"model": "x", "permissions": {"allow": ["Bash(ls)"], "deny": ["Read(./.env)"]}})
+    )
+    assert main(["setup", "--repo", str(tmp_path)]) == 0
+    settings = json.loads(settings_path.read_text())
+    store = store_root().resolve().as_posix()
+    assert settings["model"] == "x"
+    assert settings["permissions"]["allow"] == ["Bash(ls)"]
+    assert settings["permissions"]["deny"] == [
+        "Read(./.env)",
+        f"Read(/{store}/**)",
+        f"Edit(/{store}/**)",
+        "Bash(*agentic-ml-loop/holdouts*)",
+    ]
+    assert store.startswith("/") and settings["permissions"]["deny"][1].startswith("Read(//")
+    first = settings_path.read_text()
+    capsys.readouterr()
+    assert main(["setup", "--repo", str(tmp_path)]) == 0
+    assert settings_path.read_text() == first
+    assert capsys.readouterr().out == "nothing to do\n"
+
+
+@pytest.mark.parametrize(
+    "content", ["not json", "[]", '{"permissions": []}', '{"permissions": {"deny": "x"}}']
+)
+def test_setup_refuses_settings_it_cannot_merge(tmp_path: Path, content: str, capsys) -> None:
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_path.parent.mkdir()
+    settings_path.write_text(content)
+    assert main(["setup", "--repo", str(tmp_path)]) == 1
+    assert settings_path.read_text() == content
+    assert "Cannot add holdout deny rules" in capsys.readouterr().err
+    assert not (tmp_path / ".agents").exists()
+
+
+def _deny_rules(repo: Path) -> list[str]:
+    return json.loads((repo / ".claude/settings.json").read_text())["permissions"]["deny"]
+
+
+def test_store_under_home_gets_a_portable_rule(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("XDG_DATA_HOME")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    assert main(["setup", "--repo", str(tmp_path / "repo")]) == 0
+    rule = "~/.local/share/agentic-ml-loop/holdouts/**"
+    assert _deny_rules(tmp_path / "repo")[:2] == [f"Read({rule})", f"Edit({rule})"]
+
+
+def test_another_store_replaces_the_engine_rules_and_keeps_user_rules(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    user_rules = ["Read(./.env)", "Read(//srv/secrets/**)", "Read(~/agentic-ml-loop/notes/**)"]
+    settings = repo / ".claude/settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"permissions": {"deny": user_rules}}))
+    assert main(["setup", "--repo", str(repo)]) == 0
+    first_store = store_root().resolve().as_posix()
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "other"))
+    assert main(["setup", "--repo", str(repo)]) == 0
+    second_store = store_root().resolve().as_posix()
+
+    rules = _deny_rules(repo)
+    assert first_store != second_store
+    assert not [rule for rule in rules if first_store in rule]
+    assert rules == [
+        *user_rules,
+        "Bash(*agentic-ml-loop/holdouts*)",
+        f"Read(/{second_store}/**)",
+        f"Edit(/{second_store}/**)",
+    ]

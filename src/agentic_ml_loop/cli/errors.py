@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
 from pydantic import ValidationError
 
@@ -20,6 +21,14 @@ def describe(exc: BaseException) -> str:
         )
         return f"invalid {exc.title}: {details}"
     return str(exc)
+
+
+def warn_rows_stay_readable(source: Path) -> None:
+    print(
+        f"warning: Sealed rows stay readable in {source}. The engine cannot delete that file. "
+        "Move it out of the agent's reach, or deny it in the agent's settings.",
+        file=sys.stderr,
+    )
 
 
 def run_reporting_errors(command: Callable[[], int]) -> int:

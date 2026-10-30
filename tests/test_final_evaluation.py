@@ -174,6 +174,7 @@ def test_reseal_retires_the_read_holdout_and_reopens_search(scored: Path, code_r
     assert consumed["holdout"] == first.holdout.model_dump()
     assert [(e.event, e.holdout_sha256) for e in read_ledger()] == [
         ("evaluated", first.holdout.holdout_sha256),
+        ("finalized", first.holdout.holdout_sha256),
         ("retired", first.holdout.holdout_sha256),
     ]
     assert consumed["exploratory_run_ids"] == run_ids

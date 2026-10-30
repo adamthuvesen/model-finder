@@ -82,6 +82,7 @@ drive() {
       [ "$rows" = 640 ]
       ;;
     search-metrics)
+      check search-baseline run-candidate 0 "val_auc" demo run-candidate --experiment "$x" --candidate majority-baseline || return 1
       check search-metrics run-candidate 0 "val_auc" demo run-candidate --experiment "$x" --candidate logreg-tiny || return 1
       in_env "$ROOT/.venv/bin/python" -c "import json;assert all(set(e['metrics'])=={'train','validation'} for e in json.load(open('$x/results.json')))"
       ;;
@@ -92,6 +93,17 @@ drive() {
       check final-freeze freeze-candidate 0 "selected_result" demo freeze-candidate --experiment "$x" --candidate logreg-tiny || return 1
       check final-after-freeze evaluate-final 0 "holdout_sha256" demo evaluate-final --experiment "$x" || return 1
       check final-search-blocked run-candidate 1 "Selection is frozen" demo run-candidate --experiment "$x" --candidate logreg-tiny
+      ;;
+    complete)
+      printf 'logreg-tiny beats the baseline.\n' >"$x/outputs/report.md"
+      printf 'See README.md.\n' >"$x/outputs/reproduce.md"
+      check record-review record-review 0 "Review recorded" experiment_cli record-review --experiment "$x" --reviewer verify --verdict accepted --report outputs/report.md --limitation "Synthetic data." || return 1
+      check record-completion record-completion 0 "Completion recorded" experiment_cli record-completion --experiment "$x" --outcome supported --conclusion "logreg-tiny beats the baseline." --limitation "Synthetic data." --selected logreg-tiny --baseline majority-baseline --report outputs/report.md --reproduction outputs/reproduce.md || return 1
+      check complete-check complete-check 0 "check passed" experiment_cli complete-check "$x" || return 1
+      cp "$x/outputs/final_evaluation.json" "$STATE/final.json"
+      printf ' ' >>"$x/outputs/final_evaluation.json"
+      check complete-check-edited complete-check 1 "Stale evaluation" experiment_cli complete-check "$x" || return 1
+      cp "$STATE/final.json" "$x/outputs/final_evaluation.json"
       ;;
     reseal)
       in_env "$ROOT/.venv/bin/python" -c "
@@ -106,6 +118,25 @@ g(n_rows=80, seed=901).assign(event_date=pd.date_range('2027-01-01', periods=80)
       check replay replay 0 "replay.html" experiment_cli replay "$x" || return 1
       cp "$x/outputs/replay.html" "$(run_dir)/replay.html"
       grep -q logreg-tiny "$(run_dir)/replay.html"
+      ;;
+    wheel)
+      local consumer="$STATE/consumer" dist="$STATE/dist"
+      mkdir -p "$consumer"
+      (cd "$ROOT" && uv build --wheel --quiet --out-dir "$dist") || return 1
+      uv venv --quiet --python "$ROOT/.venv/bin/python" "$consumer/.venv" || return 1
+      uv pip install --quiet --python "$consumer/.venv/bin/python" "$dist"/*.whl || return 1
+      local installed="$consumer/.venv/bin"
+      check wheel-setup setup 0 "linked skill research" in_env "$installed/experiment" setup --repo "$consumer" || return 1
+      grep -q "name: research" "$consumer/.agents/skills/research/SKILL.md" || { echo "skill link does not resolve" >&2; return 1; }
+      [ -f "$consumer/.claude/skills/experiment-spec/SKILL.md" ] || { echo "no Claude skill link" >&2; return 1; }
+      grep -q "Read(~/.*agentic-ml-loop/holdouts/\*\*)" "$consumer/.claude/settings.json" || { echo "no deny rule" >&2; return 1; }
+      check wheel-contract contract 0 "Completion record" in_env "$installed/experiment" contract evidence || return 1
+      local origin
+      origin="$(cd "$consumer" && in_env "$installed/python" -c 'import agentic_ml_loop, pathlib; p = pathlib.Path(agentic_ml_loop.__file__).parent; assert (p / "py.typed").is_file(); print(p)')" || return 1
+      case "$origin" in
+        "$consumer"/*) echo "wheel engine: $origin" | tee "$(run_dir)/wheel.origin" ;;
+        *) echo "engine resolves to $origin, not the wheel" >&2; return 1 ;;
+      esac
       ;;
     missing-experiment)
       check missing-experiment run-candidate 1 "does not exist" demo run-candidate --experiment "$STATE/experiments/absent" --candidate logreg-tiny

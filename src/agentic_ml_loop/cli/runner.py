@@ -12,7 +12,7 @@ from pathlib import Path
 import pandas as pd
 
 from agentic_ml_loop.candidate_result import CandidateRunner
-from agentic_ml_loop.cli.errors import run_reporting_errors
+from agentic_ml_loop.cli.errors import run_reporting_errors, warn_rows_stay_readable
 from agentic_ml_loop.final_evaluation import evaluate_final, freeze_candidate
 from agentic_ml_loop.holdout import seal_holdout
 from agentic_ml_loop.paths import HOLDOUT_SEAL_FILE_NAME
@@ -25,6 +25,8 @@ class RunnerConfig:
     seed: ExperimentSeed
     candidate_runners: Mapping[str, CandidateRunner]
     rows_loader: Callable[[int], pd.DataFrame]
+    # Required, so that an author decides. None means no local file holds the rows.
+    rows_source: Path | None
     time_column: str
     target_column: str
     code_root: Path
@@ -64,6 +66,8 @@ def _init(config: RunnerConfig, experiment_dir: Path, *, force: bool, data_seed:
     seed = secrets.randbits(32) if data_seed is None else data_seed
     search, holdout = temporal_split(config.rows_loader(seed), config.time_column)
     seal = seal_holdout(experiment_dir, search, holdout)
+    if config.rows_source is not None:
+        warn_rows_stay_readable(config.rows_source)
     return f"Initialized {experiment_dir}. Sealed {seal.holdout_rows} holdout rows."
 
 

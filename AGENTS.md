@@ -12,7 +12,8 @@ src/agentic_ml_loop/  The engine. The `experiment` console script lives in cli/.
 demos/                Free, offline demos. They import the engine. It never imports them.
 experiments/<id>/     One experiment: spec, journal, sources, leaderboard, data, outputs.
 rules/, rule-tests/   ast-grep rules and their tests.
-.agents/skills/       research, experiment-spec, verify-agentic-ml-loop.
+src/agentic_ml_loop/skills/, contract/  Packaged skills and documents. `experiment setup` links the skills.
+.agents/skills/       Links to the packaged skills, plus verify-agentic-ml-loop.
 ```
 
 ## Commands
@@ -55,14 +56,16 @@ reverses, and offer the option that keeps the boundary: select on validation, th
 
 | Rule | Enforced by | Strength | Added |
 | --- | --- | --- | --- |
-| Search results hold no holdout metric | `SearchMetrics` and name checks in `candidate_result.py` | Hard for split keys; honest code for names, since a neutral name passes | 2026-11-04 |
+| Search results hold no holdout metric | `SearchMetrics` and name checks in `candidate_result.py` | Hard for split keys; honest code for names. Limit: a neutral or period-labelled name such as `q4_auc` passes, and it can stand in for a holdout. A name cannot prove which rows a metric used | 2026-11-04 |
 | Candidate code receives no holdout rows | `SearchSplits` type, `no-holdout-access-in-demos`, `demos-cannot-reach-holdout-store` | Honest code: a script can still read the file | 2026-11-04 |
-| Holdout rows stay outside the workspace | `holdout.py`, pull refusal, deny rule in `.claude/settings.json` | Honest code | 2026-11-04 |
+| Holdout rows stay outside the workspace | `holdout.py`, pull refusal, deny rule that `experiment setup` adds to `.claude/settings.json` | Honest code: Claude Code only, and a rule does not match every command form | 2026-11-04 |
+| A local rows file is named at seal time | Required `RunnerConfig.rows_source`, warning at seal and reseal | Report only: the engine cannot delete a source file, so its rows stay readable | 2026-11-04 |
+| Supervised feature artifacts used only training labels | `experiment check-features` | Honest code: it checks declared dates, when an agent runs it | 2026-11-04 |
 | Selection comes before holdout evaluation | `evaluate_final` | Hard in the engine | 2026-11-04 |
 | A sealed file is read at most once, in any experiment | Ledger keyed by file hash, `claim_for_evaluation` | Limit: a new-seed resplit or schema change makes a different file, so a different holdout. Limit: the ledger is a plain file, and a deliberate agent can edit it | 2026-11-04 |
 | Retiring a holdout leaves a record | `reseal_holdout`, `complete-check` | Hard, while the workspace history exists | 2026-11-04 |
-| A claim binds to real freeze, final, and ledger evidence | `_final_evidence_errors`, `_require_ledger_chain` | Hard, short of editing the ledger | 2026-11-04 |
-| Shared rows are reported and acknowledged | `data_audit.py`, `complete-check` | Report only: plain comparison and declared keys, so a cast reads as not comparable | 2026-11-04 |
+| A claim binds to real freeze, final, search-data, and ledger evidence | `_final_evidence_errors`, `_require_ledger_chain` | Hard, short of editing the ledger | 2026-11-04 |
+| Shared or incomparable rows are reported and acknowledged | `data_audit.py`, `complete-check` | Report only: plain comparison and declared keys | 2026-11-04 |
 | Only the engine writes the leaderboard | `results-json-single-writer`, `results-json-engine-only` | Honest code | 2026-11-04 |
 | Seed, bootstrap count, and gap are declared | `CandidateResult` strict fields | Hard for engine writes | 2026-11-04 |
 | Models reject unknown fields | `pydantic-extra-forbid` | Lint | 2026-11-04 |

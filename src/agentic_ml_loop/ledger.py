@@ -14,7 +14,7 @@ from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agentic_ml_loop.splits import Sha256
 
@@ -27,10 +27,12 @@ class LedgerEntry(BaseModel):
 
     schema_version: Literal[2] = 2
     holdout_sha256: Sha256
-    event: Literal["evaluated", "retired"]
+    event: Literal["evaluated", "finalized", "retired"]
     experiment_uid: str
     experiment_name: str
+    experiment_path: str
     attempt_sha256: Sha256 | None = None
+    final_sha256: Sha256 | None = None
     provenance_note: ProvenanceNote | None = None
     recorded_at: str
 
@@ -66,8 +68,19 @@ def read_ledger() -> list[LedgerEntry]:
     path = _ledger_path()
     if not path.exists():
         return []
+    entries: list[LedgerEntry] = []
     with path.open(encoding="utf-8") as handle:
-        return [LedgerEntry.model_validate_json(line) for line in handle if line.strip()]
+        for number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                entries.append(LedgerEntry.model_validate_json(line))
+            except ValidationError as exc:
+                raise ValueError(
+                    f"Holdout ledger {path} is corrupt at line {number}. Every experiment is "
+                    "blocked until that line is repaired, because a used holdout cannot be ruled out."
+                ) from exc
+    return entries
 
 
 def entries_for(holdout_sha256: str) -> list[LedgerEntry]:
@@ -106,3 +119,20 @@ def record_retirement(entry: LedgerEntry) -> None:
             for known_entry in known
         ):
             _append(entry)
+
+
+def record_final(entry: LedgerEntry) -> None:
+    """Record the final file's hash before the file exists. It binds the only valid final."""
+    with _exclusive("ledger.lock"):
+        _append(entry)
+
+
+def retired_count(experiment_uid: str) -> int:
+    """Count retired holdouts of one experiment. Every kill point in a reseal gives one answer."""
+    return len(
+        {
+            entry.holdout_sha256
+            for entry in read_ledger()
+            if entry.event == "retired" and entry.experiment_uid == experiment_uid
+        }
+    )

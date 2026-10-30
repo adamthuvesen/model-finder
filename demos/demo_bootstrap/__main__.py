@@ -20,6 +20,7 @@ CONFIG = RunnerConfig(
     ),
     candidate_runners=CANDIDATE_RUNNERS,
     rows_loader=lambda seed: generate_demo_bootstrap_dataset(seed=seed),
+    rows_source=None,
     time_column=TIME_COLUMN,
     target_column=TARGET_COLUMN,
     code_root=CODE_ROOT,

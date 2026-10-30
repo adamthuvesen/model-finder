@@ -12,7 +12,7 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentic_ml_loop.io import file_sha256, read_text, write_json
-from agentic_ml_loop.ledger import entries_for, read_ledger, store_lock, store_root
+from agentic_ml_loop.ledger import entries_for, read_ledger, retired_count, store_lock, store_root
 from agentic_ml_loop.paths import (
     DATA_DIRNAME,
     HOLDOUT_HISTORY_DIR,
@@ -39,9 +39,19 @@ def sealed_file_path(seal: HoldoutSeal) -> Path:
     return store_root() / seal.experiment_uid / f"holdout-{seal.holdout_sha256}.parquet"
 
 
-def _write_sealed_file(
+def refuse_known_file(holdout_sha256: str) -> None:
+    known = entries_for(holdout_sha256)
+    if known:
+        raise ValueError(
+            f"This exact file was already {known[0].event} by experiment "
+            f"{known[0].experiment_name}. It cannot give a fresh estimate. Use unseen rows."
+        )
+
+
+def _stage_sealed_file(
     rows: pd.DataFrame, experiment_uid: str, experiment_dir: Path
-) -> HoldoutSeal:
+) -> tuple[HoldoutSeal, Path]:
+    """Write rows to the store under a staging name and return their identity."""
     directory = store_root() / experiment_uid
     if directory.resolve().is_relative_to(experiment_dir.resolve()):
         raise ValueError("The holdout store must stay outside the experiment directory")
@@ -54,15 +64,21 @@ def _write_sealed_file(
             holdout_sha256=file_sha256(candidate),
             holdout_rows=len(rows),
         )
-        known = entries_for(seal.holdout_sha256)
-        if known:
-            raise ValueError(
-                f"This exact file was already {known[0].event} by experiment "
-                f"{known[0].experiment_name}. It cannot give a fresh estimate. Use unseen rows."
-            )
+        staged = directory / f"staged-{seal.holdout_sha256}.parquet"
         candidate.chmod(0o600)
-        candidate.replace(sealed_file_path(seal))
-    return seal
+        candidate.replace(staged)
+    return seal, staged
+
+
+def place_staged_file(seal: HoldoutSeal, staged: Path) -> None:
+    staged.replace(sealed_file_path(seal))
+
+
+def remove_other_sealed_files(seal: HoldoutSeal) -> None:
+    """Delete files left by retired seals. A retry after a crash finishes this too."""
+    for path in (store_root() / seal.experiment_uid).glob("*.parquet"):
+        if path != sealed_file_path(seal):
+            path.unlink(missing_ok=True)
 
 
 def _write_rows(rows: pd.DataFrame, path: Path) -> None:
@@ -84,7 +100,10 @@ def history_seals(experiment_dir: Path) -> list[str]:
 
 
 def consumed_holdout_count(experiment_dir: Path) -> int:
-    return len(history_seals(experiment_dir))
+    """Count retired holdouts from the ledger, so workspace edits cannot change the answer."""
+    if not (experiment_dir / HOLDOUT_SEAL_FILE_NAME).is_file():
+        return 0
+    return retired_count(read_holdout_seal(experiment_dir).experiment_uid)
 
 
 def require_history_in_ledger(experiment_dir: Path) -> None:
@@ -106,7 +125,9 @@ def seal_holdout(experiment_dir: Path, search: SearchSplits, holdout: HoldoutSpl
         if record_path.exists():
             raise ValueError(f"Holdout is already sealed: {record_path}")
         require_history_in_ledger(experiment_dir)
-        seal = _write_sealed_file(holdout.holdout, str(uuid4()), experiment_dir)
+        seal, staged = _stage_sealed_file(holdout.holdout, str(uuid4()), experiment_dir)
+        refuse_known_file(seal.holdout_sha256)
+        place_staged_file(seal, staged)
         rows_dir = data_dir(experiment_dir)
         _write_rows(search.train, rows_dir / TRAIN_FILE_NAME)
         _write_rows(search.validation, rows_dir / VALIDATION_FILE_NAME)
@@ -161,11 +182,11 @@ def check_replacement_rows(experiment_dir: Path, rows: pd.DataFrame) -> None:
         raise ValueError("New holdout rows must have the same columns as the search rows")
 
 
-def seal_replacement_rows(
+def stage_replacement_rows(
     experiment_dir: Path, retiring: HoldoutSeal, rows: pd.DataFrame
-) -> HoldoutSeal:
-    """Store new rows without committing them. The ledger refuses an exact file it knows."""
-    return _write_sealed_file(rows, retiring.experiment_uid, experiment_dir)
+) -> tuple[HoldoutSeal, Path]:
+    """Store new rows under a staging name. Nothing the experiment reads has changed yet."""
+    return _stage_sealed_file(rows, retiring.experiment_uid, experiment_dir)
 
 
 def commit_seal(experiment_dir: Path, seal: HoldoutSeal) -> None:

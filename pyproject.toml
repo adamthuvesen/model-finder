@@ -104,6 +104,9 @@ agentic_ml_loop = [
     "viz/renderer/*",
     "viz/templates/*",
     "sources/bundles/*/*",
+    "skills/**/*",
+    "contract/*.md",
+    "py.typed",
 ]
 
 [tool.pytest.ini_options]
@@ -173,7 +176,8 @@ ignore_decorators = ["@model_validator", "@field_validator"]
 # Serialized Pydantic fields, the console script, torch's forward, and the public helpers
 # that experiment scripts call. Vulture sees none of these callers.
 ignore_names = [
-    "model_config", "schema_version", "config_files", "train_target_mean", "validation_target_mean", "holdout_target_concern", "event", "experiment_name", "recorded_at", "provenance_note", "train_validation_exact_rows", "search_holdout_exact_rows", "train_validation_keys", "search_holdout_keys", "limitations", "status", "split_strategy", "reviewer",
+    "validate_label_dates",
+    "model_config", "schema_version", "config_files", "train_target_mean", "validation_target_mean", "holdout_target_concern", "event", "experiment_name", "recorded_at", "provenance_note", "experiment_path", "not_comparable", "train_validation_exact_rows", "search_holdout_exact_rows", "train_validation_keys", "search_holdout_keys", "limitations", "status", "split_strategy", "reviewer",
     "resealed_at", "python", "pulled_at", "prior_holdouts", "manifest_version", "finished_at",
     "exploratory_run_ids", "dependencies_sha256", "conclusion", "completed_at", "algorithm",
     "acknowledged_prior_holdouts", "forward", "main", "outputs_dir", "work_dir", "scripts_dir", "save_completion",
@@ -211,7 +215,7 @@ layers = [
     "run_evidence : holdout : spec",
     "results : ledger",
     "candidate_result",
-    "splits",
+    "splits : feature_provenance",
     "io : paths",
 ]
 

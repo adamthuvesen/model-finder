@@ -13,7 +13,9 @@ from agentic_ml_loop.completion import (
     evidence_file,
     save_completion,
 )
+from agentic_ml_loop.holdout import HoldoutSeal
 from agentic_ml_loop.io import write_json
+from agentic_ml_loop.ledger import LedgerEntry, record_retirement
 from agentic_ml_loop.runner import ExperimentSeed, init_experiment_dir
 from tests.conftest import SPEC
 
@@ -154,10 +156,20 @@ def test_retaining_a_baseline_requires_a_tested_comparison(reviewed) -> None:
 
 def test_retired_holdouts_must_be_acknowledged(reviewed) -> None:
     experiment, record = reviewed
-    history = experiment / "work/holdout_history/0001"
-    history.mkdir(parents=True)
-    (history / "consumed.json").write_text('{"holdout": {"holdout_sha256": "x"}}')
-    (experiment / "holdout_seal.json").write_text("{}")
+    uid = "11111111-1111-1111-1111-111111111111"
+    seal = HoldoutSeal(experiment_uid=uid, holdout_sha256="a" * 64, holdout_rows=1)
+    write_json(experiment / "holdout_seal.json", seal.model_dump())
+    record_retirement(
+        LedgerEntry(
+            holdout_sha256="b" * 64,
+            event="retired",
+            experiment_uid=uid,
+            experiment_name="experiment",
+            experiment_path="experiment",
+            provenance_note="Old.",
+            recorded_at="x",
+        )
+    )
     assert any("retired 1 holdouts" in error for error in check_completion(experiment, record))
     acknowledged = record.model_copy(update={"acknowledged_prior_holdouts": 1})
     assert check_completion(experiment, acknowledged) == []

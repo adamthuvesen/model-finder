@@ -12,11 +12,11 @@ completion claim. A budget stop leaves a checkpoint and names unresolved work.
 ## Orient or recover
 
 Native `/goal` owns continuation. Read `experiment.md`, `research_journal.md`, `research_sources.md`,
-`results.json`, `status.md` when present, [program.md](../../../program.md),
-[guidelines.md](../../../guidelines.md), and relevant `learnings.md` sections.
+`results.json`, `status.md` and `learnings.md` when present, and the output of
+`uv run experiment contract program` and `uv run experiment contract guidelines`.
 Check the question, decision, objective direction, prediction time, label horizon, split policy,
 practical improvement threshold, and budget. Resolve missing constraints before expensive work.
-Check inherited feature selection for label overlap with validation or holdout data.
+Check inherited feature selection for label overlap with validation or holdout data. For an artifact from a supervised ranking, run `uv run experiment check-features`.
 
 On recovery, reconcile unfinished run IDs with processes and artifacts.
 Check status before you repeat possibly billable work. Update `status.md`; create no other handoff file.
@@ -45,7 +45,7 @@ An interval for the selected candidate alone does not correct adaptive validatio
 Select on validation. Then run `freeze-candidate --experiment <path> --candidate <id>` and
 `evaluate-final --experiment <path>`. A frozen comparison rejects further candidate writes.
 Do not tune after reading the holdout. If a decision must change, use `experiment reseal` with
-unseen rows, as [docs/evidence.md](../../../docs/evidence.md) describes. Old estimates stay exploratory.
+unseen rows, as `uv run experiment contract evidence` describes. Old estimates stay exploratory.
 
 Ask a reviewer with fresh context to trace the question, implementation, split provenance,
 comparison, and conclusion. Review is internal work, not a user approval gate.
@@ -54,7 +54,8 @@ If review is unavailable, disclose that and do not claim reviewed completion.
 ## Checkpoint or finish
 
 Write `outputs/<report>.md` with the decision, baseline comparison, uncertainty, scope, limitations,
-and reproduction commands. Create the records in [docs/evidence.md](../../../docs/evidence.md).
+and reproduction commands. Have the fresh reviewer run `uv run experiment record-review`.
+Then run `uv run experiment record-completion`. `uv run experiment contract evidence` shows both commands.
 Run `uv run experiment complete-check experiments/<id>` before you claim reviewed completion.
 It checks references and freshness, not scientific validity.
 

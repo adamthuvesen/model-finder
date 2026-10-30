@@ -11,7 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from agentic_ml_loop.final_evaluation import load_verified_final
 from agentic_ml_loop.holdout import consumed_holdout_count
 from agentic_ml_loop.io import read_text, write_json
-from agentic_ml_loop.paths import COMPLETION_PATH, FINAL_PATH, SPECIFICATION_FILE_NAME
+from agentic_ml_loop.paths import (
+    COMPLETION_PATH,
+    FINAL_PATH,
+    REVIEW_PATH,
+    SPECIFICATION_FILE_NAME,
+)
 from agentic_ml_loop.results import RESULTS_FILE_NAME, RecordedResult, load_results
 from agentic_ml_loop.run_evidence import validate_run_evidence
 from agentic_ml_loop.splits import Sha256
@@ -169,11 +174,11 @@ def _final_evidence_errors(experiment_dir: Path, record: CompletionRecord) -> li
     frozen = selection.selected_result.candidate_id
     if record.selected_candidate_id != frozen:
         errors.append(f"Completion selects {record.selected_candidate_id}, but {frozen} was frozen")
-    if final.overlap.shares_rows and not (
+    if final.overlap.needs_acknowledgement and not (
         record.acknowledged_overlap and record.acknowledged_overlap.strip()
     ):
         errors.append(
-            f"The final evaluation reports shared rows: {final.overlap.model_dump()}. "
+            f"The final evaluation reports shared or incomparable rows: {final.overlap.model_dump()}. "
             "Say why that is acceptable in acknowledged_overlap."
         )
     return errors
@@ -240,3 +245,49 @@ def save_completion(experiment_dir: Path, record: CompletionRecord) -> Path:
     path = experiment_dir / COMPLETION_PATH
     write_json(path, record.model_dump())
     return path
+
+
+def write_review(
+    experiment_dir: Path,
+    reviewer: str,
+    verdict: Literal["accepted", "changes_requested"],
+    report_path: str,
+    evaluation_path: str,
+    findings: list[str],
+    limitations: list[str],
+) -> Path:
+    """Bind a reviewer's verdict to the current hashes of what was reviewed."""
+    review = ResearchReview(
+        reviewer=reviewer,
+        verdict=verdict,
+        specification_sha256=evidence_file(experiment_dir, SPECIFICATION_FILE_NAME).sha256,
+        results_sha256=evidence_file(experiment_dir, RESULTS_FILE_NAME).sha256,
+        report_sha256=evidence_file(experiment_dir, report_path).sha256,
+        evaluation_sha256=evidence_file(experiment_dir, evaluation_path).sha256,
+        findings=findings,
+        limitations=limitations,
+    )
+    path = experiment_dir / REVIEW_PATH
+    write_json(path, review.model_dump())
+    return path
+
+
+def record_from_evidence(
+    experiment_dir: Path,
+    report_path: str,
+    evaluation_path: str,
+    reproduction_path: str,
+    **claim: object,
+) -> CompletionRecord:
+    """Build a record whose references carry the current hash of each file."""
+    return CompletionRecord.model_validate(
+        {
+            **claim,
+            "specification": evidence_file(experiment_dir, SPECIFICATION_FILE_NAME),
+            "results": evidence_file(experiment_dir, RESULTS_FILE_NAME),
+            "report": evidence_file(experiment_dir, report_path),
+            "evaluation": evidence_file(experiment_dir, evaluation_path),
+            "review": evidence_file(experiment_dir, REVIEW_PATH),
+            "reproduction": evidence_file(experiment_dir, reproduction_path),
+        }
+    )

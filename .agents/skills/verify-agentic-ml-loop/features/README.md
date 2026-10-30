@@ -13,8 +13,7 @@ Drive in the table's order. The drives share one experiment, `run_a`. Start agai
 `.venv/bin/experiment --help` and `.venv/bin/python -m demos.demo_bootstrap --help`. Each subcommand
 name is an `Inventory-id`, prefixed `experiment:` or `runner:`.
 
-Unmapped: `experiment:complete-check` (`tests/test_end_to_end.py` covers it, because it needs a written
-review), `experiment:seal` and `experiment:pull` (need a warehouse snapshot, tested with DuckDB in
+Unmapped: `experiment:seal` and `experiment:pull` (need a warehouse snapshot, tested with DuckDB in
 `tests/test_sources.py`), `experiment:sources`,
 `runner:list-candidates` (read-only listings).
 
@@ -32,5 +31,7 @@ and the unmet prerequisite. A pass on retry is `flaky`.
 | Feature | File | Inventory ids | Last verified |
 | --- | --- | --- | --- |
 | Seal, search, select, evaluate | [holdout-flow.md](holdout-flow.md) | runner:init-demo, runner:run-candidate, runner:freeze-candidate, runner:evaluate-final | 49cf9e6-dirty 2026-11-04 created |
+| Record and check completion | [complete.md](complete.md) | experiment:record-review, experiment:record-completion, experiment:complete-check | 7c6c6e4-dirty 2026-11-04 created |
+| Install from a built wheel | [wheel.md](wheel.md) | experiment:setup, experiment:contract | 0c94d65-dirty 2026-11-04 created |
 | Retire a read holdout | [reseal.md](reseal.md) | experiment:reseal, experiment:validate | 49cf9e6-dirty 2026-11-04 created |
 | Replay and errors | [replay-and-errors.md](replay-and-errors.md) | experiment:replay | 49cf9e6-dirty 2026-11-04 created |

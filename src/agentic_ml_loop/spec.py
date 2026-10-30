@@ -52,7 +52,8 @@ def get_key_columns(experiment_dir: Path) -> list[str]:
     declared = re.search(r"^key_columns:[ \t]*(.*)$", read_text(spec_path), re.MULTILINE)
     if declared is None:
         return []
-    return [column.strip().strip("`") for column in declared.group(1).split(",") if column.strip()]
+    columns = [column.strip().strip("`") for column in declared.group(1).split(",")]
+    return list(dict.fromkeys(column for column in columns if column))
 
 
 def research_journal_template(experiment_id: str) -> str:

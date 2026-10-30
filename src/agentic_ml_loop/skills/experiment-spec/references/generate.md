@@ -1,6 +1,6 @@
 # Generate an experiment
 
-Candidate code lives in your own package, outside `src/agentic_ml_loop/`. Follow `demos/demo_bootstrap/`.
+Candidate code lives in your own package, outside the engine. A checkout of the engine has a worked example in `demos/demo_bootstrap/`. The wheel does not ship it.
 
 ## Candidates
 
@@ -43,6 +43,7 @@ CONFIG = RunnerConfig(
     seed=ExperimentSeed(experiment_id="my_slug", template_path=HERE / "experiment_template.md"),
     candidate_runners=CANDIDATE_RUNNERS,
     rows_loader=load_rows,        # takes a seed, returns the full dataset; used only to seal
+    rows_source=HERE / "rows.csv",  # the local file it reads, or None. Seal warns that it stays readable
     time_column="event_date",
     target_column="converted",    # read by the split audit at freeze
     code_root=HERE,               # this whole tree is fingerprinted for run evidence
@@ -56,7 +57,7 @@ For a sealed warehouse snapshot, `rows_loader` is not called, because `init-demo
 
 ## Spec
 
-Start from `src/agentic_ml_loop/templates/model-search.md`. Fill it from the confirmed proposal.
+Start from the output of `uv run experiment contract spec-template`. Fill it from the confirmed proposal.
 Seed `research_sources.md` with the discovery references.
 
 ## Run and check

@@ -27,8 +27,21 @@ SELECTION_PATH = "work/selection.json"
 ATTEMPT_PATH = "work/final_evaluation_started.json"
 FINAL_PATH = "outputs/final_evaluation.json"
 COMPLETION_PATH = "outputs/completion.json"
+REVIEW_PATH = "outputs/review.json"
 HOLDOUT_HISTORY_DIR = "work/holdout_history"
 SNAPSHOT_FILE_NAME = "snapshot.parquet"
+
+
+def repository_relative_path(experiment_dir: Path) -> str:
+    """Name an experiment by its place in its repository, or by its own name outside one.
+
+    A moved repository or a clone keeps this name. A copy into another directory does not.
+    """
+    resolved = experiment_dir.resolve()
+    for parent in resolved.parents:
+        if (parent / ".git").exists():
+            return resolved.relative_to(parent).as_posix()
+    return resolved.name
 
 
 def _mkdir_p(path: Path) -> Path:

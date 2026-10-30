@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import sys
 import threading
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from agentic_ml_loop.completion import (
     check_completion,
     evidence_file,
 )
+from agentic_ml_loop.data_audit import OverlapReport
 from agentic_ml_loop.final_evaluation import evaluate_final, freeze_candidate, reseal_holdout
 from agentic_ml_loop.holdout import (
     consumed_holdout_count,
@@ -30,8 +33,13 @@ from agentic_ml_loop.holdout import (
 from agentic_ml_loop.io import write_json
 from agentic_ml_loop.ledger import entries_for, read_ledger, store_root
 from agentic_ml_loop.paths import ATTEMPT_PATH, FINAL_PATH
+from agentic_ml_loop.run_evidence import (
+    _dependencies_sha256,
+    code_fingerprint,
+    recorded_fingerprint_is_current,
+)
 from agentic_ml_loop.runner import ExperimentSeed, init_experiment_dir, save_candidate_result
-from agentic_ml_loop.splits import HoldoutSplits, temporal_split
+from agentic_ml_loop.splits import HoldoutSplits, SearchSplits, temporal_split
 from tests.conftest import SPEC, fitted, rows
 
 RUNNERS: dict[str, CandidateRunner] = {"candidate-a": fitted}
@@ -128,8 +136,12 @@ def test_killed_reseal_leaves_no_readable_holdout(
     new = reseal_holdout(scored, _new_rows(), "Retiring.")
     assert read_holdout_seal(scored) == new
     assert consumed_holdout_count(scored) == 1
-    assert [e.event for e in entries_for(before.holdout_sha256)] == ["evaluated", "retired"]
-    assert entries_for(before.holdout_sha256)[1].provenance_note == "Retiring."
+    assert [e.event for e in entries_for(before.holdout_sha256)] == [
+        "evaluated",
+        "finalized",
+        "retired",
+    ]
+    assert entries_for(before.holdout_sha256)[2].provenance_note == "Retiring."
 
 
 def test_retired_unread_holdout_cannot_be_read(scored: Path, code_root: Path, monkeypatch) -> None:
@@ -137,7 +149,7 @@ def test_retired_unread_holdout_cannot_be_read(scored: Path, code_root: Path, mo
         raise RuntimeError("killed")
 
     with monkeypatch.context() as patch:
-        patch.setattr(final_evaluation, "seal_replacement_rows", kill)
+        patch.setattr(final_evaluation, "_write_history", kill)
         with pytest.raises(RuntimeError):
             reseal_holdout(scored, _new_rows(), "Retiring.")
     save_candidate_result(scored, "candidate-a", RUNNERS, code_root)
@@ -216,6 +228,7 @@ def test_hand_written_final_evidence_fails_completion(scored: Path) -> None:
             "search_holdout_exact_rows": 0,
             "train_validation_keys": None,
             "search_holdout_keys": None,
+            "not_comparable": [],
         },
         "limitations": [],
     }
@@ -249,26 +262,13 @@ def test_overlap_is_reported_and_completion_requires_acknowledgement(
     assert final.overlap.search_holdout_keys == 150
     assert final.overlap.key_columns == ["when"]
     errors = check_completion(path, _write_review_and_record(path))
-    assert any("reports shared rows" in error for error in errors)
+    assert any("reports shared or incomparable rows" in error for error in errors)
     assert not any(
-        "reports shared rows" in error
+        "reports shared or incomparable rows" in error
         for error in check_completion(
             path, _write_review_and_record(path, acknowledged_overlap="Known duplicates.")
         )
     )
-
-
-def test_overlap_report_says_when_a_cast_makes_rows_incomparable(
-    tmp_path: Path, code_root: Path
-) -> None:
-    path = tmp_path / "cast"
-    init_experiment_dir(path, ExperimentSeed("cast"))
-    (path / "experiment.md").write_text(SPEC)
-    search, holdout = temporal_split(rows(count=100), "when")
-    cast = holdout.holdout.assign(label=holdout.holdout["label"].astype(float))
-    seal_holdout(path, search, HoldoutSplits(holdout=cast))
-    save_candidate_result(path, "candidate-a", RUNNERS, code_root)
-    assert _freeze_and_evaluate(path).overlap.search_holdout_exact_rows is None
 
 
 def test_freeze_reports_drift_without_reading_the_holdout(sealed: Path, code_root: Path) -> None:
@@ -331,7 +331,7 @@ def test_six_fresh_seeds_all_evaluate(tmp_path: Path, code_root: Path) -> None:
     for seed in range(1, 7):
         final = _freeze_and_evaluate(_experiment(tmp_path / f"run{seed}", code_root, seed=seed))
         assert final.prior_holdouts == 0
-    assert len(read_ledger()) == 6
+    assert sum(entry.event == "evaluated" for entry in read_ledger()) == 6
 
 
 def test_ledger_file_lives_outside_workspaces(scored: Path) -> None:
@@ -375,3 +375,304 @@ def test_unwritable_store_fails_closed(sealed: Path, tmp_path: Path, monkeypatch
     monkeypatch.setenv("XDG_DATA_HOME", str(blocker))
     with pytest.raises(OSError):
         reseal_holdout(sealed, _new_rows(), "Store unreachable.")
+
+
+def _kill(*_args: object) -> None:
+    raise RuntimeError("killed")
+
+
+def _completion_errors(path: Path, **fields: object) -> list[str]:
+    return check_completion(path, _write_review_and_record(path, **fields))
+
+
+def test_kill_after_the_attempt_leaves_no_completable_state(scored: Path, monkeypatch) -> None:
+    freeze_candidate(scored, "candidate-a", "label")
+    genuine_metrics = {"auc": 0.999}
+
+    def crash(_rows: pd.DataFrame) -> dict[str, float]:
+        raise RuntimeError("killed after the attempt")
+
+    def runner(splits):
+        return type(fitted(splits))(result=fitted(splits).result, score_rows=crash)
+
+    with pytest.raises(RuntimeError):
+        evaluate_final(scored, {"candidate-a": runner})
+    selection = final_evaluation.FrozenSelection.model_validate_json(
+        (scored / "work/selection.json").read_text()
+    )
+    attempt = final_evaluation.FinalAttempt.model_validate_json((scored / ATTEMPT_PATH).read_text())
+    forged = final_evaluation.FinalEvaluation(
+        selected_run_id=attempt.selected_run_id,
+        selection_sha256=attempt.selection_sha256,
+        attempt_sha256=evidence_file(scored, ATTEMPT_PATH).sha256,
+        holdout=attempt.holdout,
+        completed_at="x",
+        metrics=genuine_metrics,
+        selection_metrics=selection.selected_result.metrics,
+        prior_holdouts=0,
+        holdout_target_concern=None,
+        overlap=OverlapReport(
+            key_columns=[],
+            train_validation_exact_rows=0,
+            search_holdout_exact_rows=0,
+            train_validation_keys=None,
+            search_holdout_keys=None,
+            not_comparable=[],
+        ),
+        limitations=[],
+    )
+    write_json(scored / FINAL_PATH, forged.model_dump(mode="json"))
+    assert any("edited or forged" in error for error in _completion_errors(scored))
+
+
+def test_editing_a_genuine_final_fails_completion(scored: Path) -> None:
+    _freeze_and_evaluate(scored)
+    payload = json.loads((scored / FINAL_PATH).read_text())
+    payload["metrics"]["auc"] = 0.999
+    write_json(scored / FINAL_PATH, payload)
+    assert any("edited or forged" in error for error in _completion_errors(scored))
+
+
+def test_refused_reseal_changes_nothing(scored: Path) -> None:
+    used = _experiment(scored.parent / "other", scored.parent / "candidate_code", seed=77)
+    known = pd.read_parquet(sealed_file_path(read_holdout_seal(used)))
+    _freeze_and_evaluate(used)
+    freeze_candidate(scored, "candidate-a", "label")
+    seal = read_holdout_seal(scored)
+    with pytest.raises(ValueError, match="already evaluated"):
+        reseal_holdout(scored, known, "Known rows.")
+    assert read_holdout_seal(scored) == seal
+    assert entries_for(seal.holdout_sha256) == []
+    assert (scored / "work/selection.json").is_file()
+    assert evaluate_final(scored, RUNNERS).holdout == seal
+
+
+def test_retry_after_commit_is_a_no_op_and_keeps_fresh_rows(scored: Path, monkeypatch) -> None:
+    with monkeypatch.context() as patch:
+        patch.setattr(final_evaluation, "remove_other_sealed_files", _kill)
+        with pytest.raises(RuntimeError):
+            reseal_holdout(scored, _new_rows(), "Retiring.")
+    committed = read_holdout_seal(scored)
+    assert reseal_holdout(scored, _new_rows(), "Retiring.") == committed
+    assert entries_for(committed.holdout_sha256) == []
+    assert consumed_holdout_count(scored) == 1
+    assert sealed_file_path(committed).is_file()
+    assert len(list(sealed_file_path(committed).parent.glob("*.parquet"))) == 1
+
+
+@pytest.mark.parametrize("kill_point", ["_write_history", "place_staged_file", "commit_seal", None])
+def test_prior_count_is_the_same_at_every_kill_point(
+    scored: Path, monkeypatch, kill_point: str | None
+) -> None:
+    _freeze_and_evaluate(scored)
+    with monkeypatch.context() as patch:
+        if kill_point:
+            patch.setattr(final_evaluation, kill_point, _kill)
+            with pytest.raises(RuntimeError):
+                reseal_holdout(scored, _new_rows(), "Retiring.")
+        else:
+            reseal_holdout(scored, _new_rows(), "Retiring.")
+    assert consumed_holdout_count(scored) == 1
+
+
+def test_deleting_history_does_not_lower_the_count(scored: Path) -> None:
+    reseal_holdout(scored, _new_rows(), "Retiring.")
+    shutil.rmtree(scored / "work/holdout_history")
+    assert consumed_holdout_count(scored) == 1
+
+
+def test_kill_before_history_then_second_reseal_counts_two(scored: Path, monkeypatch) -> None:
+    with monkeypatch.context() as patch:
+        patch.setattr(final_evaluation, "_write_history", _kill)
+        with pytest.raises(RuntimeError):
+            reseal_holdout(scored, _new_rows(), "First.")
+    reseal_holdout(scored, _new_rows(), "First.")
+    reseal_holdout(scored, _new_rows(seed=100), "Second.")
+    assert consumed_holdout_count(scored) == 2
+
+
+def test_holdout_equal_to_train_with_one_nan_is_counted(tmp_path: Path, code_root: Path) -> None:
+    path = tmp_path / "nan"
+    init_experiment_dir(path, ExperimentSeed("nan"))
+    (path / "experiment.md").write_text(SPEC)
+    search, _ = temporal_split(rows(count=100), "when")
+    copied = search.train.copy()
+    copied["label"] = copied["label"].astype(float)
+    copied.loc[copied.index[0], "label"] = float("nan")
+    seal_holdout(path, search, HoldoutSplits(holdout=copied))
+    save_candidate_result(path, "candidate-a", RUNNERS, code_root)
+    overlap = _freeze_and_evaluate(path).overlap
+    assert overlap.search_holdout_exact_rows == len(copied) - 1
+
+
+def test_a_comparison_that_cannot_run_requires_acknowledgement(
+    tmp_path: Path, code_root: Path
+) -> None:
+    path = tmp_path / "text"
+    init_experiment_dir(path, ExperimentSeed("text"))
+    (path / "experiment.md").write_text(SPEC)
+    search, holdout = temporal_split(rows(count=100), "when")
+    seal_holdout(path, search, HoldoutSplits(holdout=holdout.holdout.astype({"signal": str})))
+    save_candidate_result(path, "candidate-a", _text_tolerant_runners(), code_root)
+    freeze_candidate(path, "candidate-a", "label")
+    final = evaluate_final(path, _text_tolerant_runners())
+    assert final.overlap.not_comparable == ["search_holdout_exact_rows"]
+    errors = _completion_errors(path)
+    assert any("shared or incomparable" in error for error in errors)
+
+
+def _text_tolerant_runners() -> dict[str, CandidateRunner]:
+    def runner(splits):
+        result = fitted(splits)
+        return type(result)(
+            result=result.result, score_rows=lambda frame: {"auc": float(len(frame))}
+        )
+
+    return {"candidate-a": runner}
+
+
+def test_key_misspelled_after_freeze_fails_before_the_read(scored: Path) -> None:
+    freeze_candidate(scored, "candidate-a", "label")
+    (scored / "experiment.md").write_text(SPEC + "\nkey_columns: wehn\n")
+    with pytest.raises(ValueError, match="stale"):
+        evaluate_final(scored, RUNNERS)
+    assert read_ledger() == []
+
+
+def test_misspelled_key_fails_the_freeze_before_any_read(sealed: Path, code_root: Path) -> None:
+    (sealed / "experiment.md").write_text(SPEC + "\nkey_columns: wehn\n")
+    save_candidate_result(sealed, "candidate-a", RUNNERS, code_root)
+    with pytest.raises(ValueError, match="wehn"):
+        freeze_candidate(sealed, "candidate-a", "label")
+    assert read_ledger() == []
+
+
+def test_duplicate_and_nan_keys(tmp_path: Path, code_root: Path) -> None:
+    path = tmp_path / "keys"
+    init_experiment_dir(path, ExperimentSeed("keys"))
+    (path / "experiment.md").write_text(SPEC + "\nkey_columns: account, account\n")
+    search, holdout = temporal_split(rows(count=100), "when")
+    with_keys = SearchSplits(
+        train=search.train.assign(account=np.nan),
+        validation=search.validation.assign(account=np.nan),
+    )
+    seal_holdout(path, with_keys, HoldoutSplits(holdout=holdout.holdout.assign(account=np.nan)))
+    save_candidate_result(path, "candidate-a", RUNNERS, code_root)
+    overlap = _freeze_and_evaluate(path).overlap
+    assert overlap.key_columns == ["account"]
+    assert overlap.search_holdout_keys == 0
+
+
+def test_swapped_search_rows_fail_completion(scored: Path) -> None:
+    _freeze_and_evaluate(scored)
+    train = scored / "data/train.parquet"
+    pd.read_parquet(train).assign(signal=0.0).to_parquet(train, index=False)
+    assert any("Search data changed" in error for error in _completion_errors(scored))
+
+
+def test_copied_evidence_fails_completion_in_the_copy(scored: Path) -> None:
+    _freeze_and_evaluate(scored)
+    copy = scored.parent / "copied"
+    shutil.copytree(scored, copy)
+    assert any("does not carry over" in error for error in _completion_errors(copy))
+
+
+def test_rows_through_workspace_symlink_and_case_variant_are_refused(
+    scored: Path, tmp_path: Path, capsys
+) -> None:
+    outside = tmp_path / "rows.parquet"
+    _new_rows().to_parquet(outside, index=False)
+    link = scored / "work" / "link.parquet"
+    link.symlink_to(outside)
+    assert main(["reseal", "--experiment", str(scored), "--rows", str(link), "--note", "x"]) == 1
+    directory_link = tmp_path / "alias"
+    directory_link.symlink_to(scored)
+    inside = scored / "work" / "rows.parquet"
+    _new_rows().to_parquet(inside, index=False)
+    through_alias = directory_link / "work" / "rows.parquet"
+    assert (
+        main(["reseal", "--experiment", str(scored), "--rows", str(through_alias), "--note", "x"])
+        == 1
+    )
+    variant = scored.parent / scored.name.upper() / "work" / "rows.parquet"
+    if sys.platform == "darwin":
+        assert variant.exists()
+        assert (
+            main(["reseal", "--experiment", str(scored), "--rows", str(variant), "--note", "x"])
+            == 1
+        )
+    assert "outside the experiment" in capsys.readouterr().err
+    assert read_ledger() == []
+
+
+def test_corrupt_ledger_error_names_the_file_and_line(scored: Path) -> None:
+    ledger = store_root() / "ledger.jsonl"
+    reseal_holdout(scored, _new_rows(), "First.")
+    ledger.write_text(ledger.read_text() + "not json\n")
+    with pytest.raises(ValueError, match=rf"{ledger}.*line 2"):
+        read_ledger()
+
+
+def test_dependency_hash_ignores_stray_egg_info_on_the_path(tmp_path: Path, monkeypatch) -> None:
+    before = _dependencies_sha256()
+    egg = tmp_path / "stray.egg-info"
+    egg.mkdir()
+    (egg / "PKG-INFO").write_text("Name: stray\nVersion: 1\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    assert _dependencies_sha256() == before
+
+
+def test_symlinked_helper_directory_is_fingerprinted(tmp_path: Path) -> None:
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    (helpers / "helper.py").write_text("1\n")
+    root = tmp_path / "pkg"
+    root.mkdir()
+    (root / "linked").symlink_to(helpers)
+    (root / "loop").symlink_to(root)
+    experiment = tmp_path / "e"
+    experiment.mkdir()
+    recorded = code_fingerprint(experiment, root)
+    assert recorded_fingerprint_is_current(experiment, recorded)
+    (helpers / "helper.py").write_text("2\n")
+    assert not recorded_fingerprint_is_current(experiment, recorded)
+
+
+def _evaluated_in_repository(tmp_path: Path) -> Path:
+    repository = tmp_path / "repository"
+    (repository / ".git").mkdir(parents=True)
+    code = repository / "candidate_code"
+    code.mkdir()
+    (code / "module.py").write_text("VERSION = 1\n")
+    experiment = _experiment(repository / "experiments" / "run", code)
+    runners: dict[str, CandidateRunner] = {
+        "candidate-b": lambda splits: fitted(splits, "candidate-b")
+    }
+    save_candidate_result(experiment, "candidate-b", runners, code)
+    _freeze_and_evaluate(experiment)
+    return experiment
+
+
+def _supported_errors(experiment: Path) -> list[str]:
+    return _completion_errors(
+        experiment,
+        outcome="supported",
+        baseline_candidate_id="candidate-b",
+        comparison_candidate_id=None,
+    )
+
+
+def test_moving_the_whole_repository_keeps_valid_evidence(tmp_path: Path) -> None:
+    experiment = _evaluated_in_repository(tmp_path)
+    assert _supported_errors(experiment) == []
+    moved = tmp_path / "elsewhere" / "renamed"
+    moved.parent.mkdir()
+    shutil.move(tmp_path / "repository", moved)
+    assert _supported_errors(moved / "experiments" / "run") == []
+
+
+def test_copy_to_a_sibling_directory_in_the_repository_fails(tmp_path: Path) -> None:
+    experiment = _evaluated_in_repository(tmp_path)
+    sibling = experiment.parent / "sibling"
+    shutil.copytree(experiment, sibling)
+    assert any("does not carry over" in error for error in _supported_errors(sibling))

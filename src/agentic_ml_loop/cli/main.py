@@ -3,15 +3,29 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 import pandas as pd
 
-from agentic_ml_loop.cli.errors import run_reporting_errors
-from agentic_ml_loop.completion import check_completion
+from agentic_ml_loop.cli.errors import run_reporting_errors, warn_rows_stay_readable
+from agentic_ml_loop.cli.setup import setup_repo
+from agentic_ml_loop.completion import (
+    check_completion,
+    record_from_evidence,
+    save_completion,
+    write_review,
+)
+from agentic_ml_loop.feature_provenance import validate_feature_provenance
 from agentic_ml_loop.final_evaluation import reseal_holdout
-from agentic_ml_loop.paths import DATA_DIRNAME, HOLDOUT_SEAL_FILE_NAME, OUTPUTS_DIRNAME
+from agentic_ml_loop.holdout import load_search_splits
+from agentic_ml_loop.paths import (
+    DATA_DIRNAME,
+    FINAL_PATH,
+    HOLDOUT_SEAL_FILE_NAME,
+    OUTPUTS_DIRNAME,
+)
 from agentic_ml_loop.sources.adapters import SUPPORTED_SOURCE_TYPES
 from agentic_ml_loop.sources.query import (
     apply_as_of,
@@ -28,6 +42,14 @@ from agentic_ml_loop.sources.snapshot import (
 )
 from agentic_ml_loop.validation import validate_experiment
 from agentic_ml_loop.viz.bundle import write_replay
+
+_PACKAGE_ROOT = Path(__file__).parents[1]
+CONTRACT_DOCUMENTS = {
+    "evidence": _PACKAGE_ROOT / "contract" / "evidence.md",
+    "guidelines": _PACKAGE_ROOT / "contract" / "guidelines.md",
+    "program": _PACKAGE_ROOT / "contract" / "program.md",
+    "spec-template": _PACKAGE_ROOT / "templates" / "model-search.md",
+}
 
 
 def _validate(args: argparse.Namespace) -> int:
@@ -57,6 +79,68 @@ def _complete_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def _record_review(args: argparse.Namespace) -> int:
+    path = write_review(
+        Path(args.experiment),
+        args.reviewer,
+        args.verdict,
+        args.report,
+        args.evaluation,
+        args.finding,
+        args.limitation,
+    )
+    print(f"Review recorded: {path}")
+    return 0
+
+
+def _record_completion(args: argparse.Namespace) -> int:
+    experiment_dir = Path(args.experiment)
+    record = record_from_evidence(
+        experiment_dir,
+        args.report,
+        args.evaluation,
+        args.reproduction,
+        outcome=args.outcome,
+        conclusion=args.conclusion,
+        limitations=args.limitation,
+        selected_candidate_id=args.selected,
+        baseline_candidate_id=args.baseline,
+        comparison_candidate_id=args.comparison,
+        acknowledged_prior_holdouts=args.acknowledged_prior_holdouts,
+        acknowledged_overlap=args.acknowledged_overlap,
+    )
+    print(f"Completion recorded: {save_completion(experiment_dir, record)}")
+    return 0
+
+
+def _setup(args: argparse.Namespace) -> int:
+    print("\n".join(setup_repo(Path(args.repo).resolve()) or ["nothing to do"]))
+    return 0
+
+
+def _contract(args: argparse.Namespace) -> int:
+    print(CONTRACT_DOCUMENTS[args.document].read_text(encoding="utf-8"), end="")
+    return 0
+
+
+def _row_dates(rows: pd.DataFrame, time_column: str) -> set[str]:
+    return {str(date) for date in pd.DatetimeIndex(rows[time_column]).strftime("%Y-%m-%d")}
+
+
+def _check_features(args: argparse.Namespace) -> int:
+    search = load_search_splits(Path(args.experiment))
+    if args.time_column not in search.train.columns:
+        raise ValueError(f"Time column is missing from search rows: {args.time_column}")
+    validate_feature_provenance(
+        Path(args.artifact),
+        selection_train_dates=_row_dates(search.train, args.time_column),
+        validation_dates=_row_dates(search.validation, args.time_column),
+        test_dates=(),
+    )
+    print(f"Feature provenance holds: {args.artifact}")
+    return 0
+
+
 def _seal(args: argparse.Namespace) -> int:
     seal = seal_snapshot(
         Path(args.experiment),
@@ -68,16 +152,26 @@ def _seal(args: argparse.Namespace) -> int:
     return 0
 
 
+def _is_inside(path: Path, directory: Path) -> bool:
+    """Compare by file identity, through symlinks and case-insensitive file systems."""
+    for candidate in (Path(os.path.normpath(path.absolute())), path.resolve()):
+        for parent in candidate.parents:
+            if parent.exists() and parent.samefile(directory):
+                return True
+    return False
+
+
 def _reseal(args: argparse.Namespace) -> int:
     experiment_dir = Path(args.experiment).resolve()
-    rows_path = Path(args.rows).resolve()
-    if rows_path.is_relative_to(experiment_dir):
+    rows_path = Path(args.rows)
+    if _is_inside(rows_path, experiment_dir):
         raise ValueError(
             "New holdout rows must come from outside the experiment. "
             "Rows inside it are visible to search."
         )
     seal = reseal_holdout(experiment_dir, pd.read_parquet(rows_path), args.note)
     print(f"Retired the old holdout. Sealed {seal.holdout_rows} new rows: {seal.holdout_sha256}")
+    warn_rows_stay_readable(rows_path)
     return 0
 
 
@@ -183,6 +277,37 @@ def _add_pull_arguments(pull: argparse.ArgumentParser) -> None:
     pull.set_defaults(func=_pull)
 
 
+def _add_review_arguments(review: argparse.ArgumentParser) -> None:
+    review.add_argument("--experiment", required=True)
+    review.add_argument("--reviewer", required=True)
+    review.add_argument("--verdict", required=True, choices=["accepted", "changes_requested"])
+    review.add_argument("--report", required=True, help="Path inside the experiment")
+    review.add_argument("--evaluation", default=FINAL_PATH, help="Path inside the experiment")
+    review.add_argument("--finding", action="append", default=[], help="Repeat for each finding")
+    review.add_argument("--limitation", action="append", required=True, help="Repeat for each")
+    review.set_defaults(func=_record_review)
+
+
+def _add_completion_arguments(completion: argparse.ArgumentParser) -> None:
+    completion.add_argument("--experiment", required=True)
+    completion.add_argument(
+        "--outcome",
+        required=True,
+        choices=["supported", "no_demonstrated_improvement", "inconclusive"],
+    )
+    completion.add_argument("--conclusion", required=True)
+    completion.add_argument("--limitation", action="append", required=True, help="Repeat for each")
+    completion.add_argument("--report", required=True, help="Path inside the experiment")
+    completion.add_argument("--reproduction", required=True, help="Path inside the experiment")
+    completion.add_argument("--evaluation", default=FINAL_PATH, help="Path inside the experiment")
+    completion.add_argument("--selected", default=None, help="Candidate ID")
+    completion.add_argument("--baseline", default=None, help="Candidate ID")
+    completion.add_argument("--comparison", default=None, help="Candidate ID when baseline stays")
+    completion.add_argument("--acknowledged-prior-holdouts", type=int, default=0)
+    completion.add_argument("--acknowledged-overlap", default=None)
+    completion.set_defaults(func=_record_completion)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="experiment", description="ML experiment evidence tools")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -197,6 +322,35 @@ def _parser() -> argparse.ArgumentParser:
     complete = subparsers.add_parser("complete-check", help="Check research completion evidence")
     complete.add_argument("experiment")
     complete.set_defaults(func=_complete_check)
+
+    _add_review_arguments(
+        subparsers.add_parser(
+            "record-review", help="Write outputs/review.json with current evidence hashes"
+        )
+    )
+    _add_completion_arguments(
+        subparsers.add_parser(
+            "record-completion", help="Write outputs/completion.json if the completion check passes"
+        )
+    )
+
+    setup = subparsers.add_parser(
+        "setup", help="Link the packaged skills and deny the holdout store to Claude Code"
+    )
+    setup.add_argument("--repo", default=".", help="Repository root. Default: this directory")
+    setup.set_defaults(func=_setup)
+
+    contract = subparsers.add_parser("contract", help="Print a packaged document")
+    contract.add_argument("document", choices=sorted(CONTRACT_DOCUMENTS))
+    contract.set_defaults(func=_contract)
+
+    features = subparsers.add_parser(
+        "check-features", help="Check that a feature artifact used only training labels"
+    )
+    features.add_argument("--experiment", required=True)
+    features.add_argument("--artifact", required=True)
+    features.add_argument("--time-column", required=True)
+    features.set_defaults(func=_check_features)
 
     seal = subparsers.add_parser("seal", help="Seal the latest snapshot rows as the holdout")
     seal.add_argument("--experiment", required=True)

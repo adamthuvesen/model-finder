@@ -6,6 +6,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import site
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -46,20 +47,28 @@ class RunEvidence(BaseModel):
     runtime_seconds: float
 
 
-def _tree_files(root: Path) -> list[Path]:
-    return sorted(
-        path
-        for path in root.rglob("*")
-        if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
-    )
+def _tree_files(root: Path) -> list[tuple[str, Path]]:
+    """Walk a tree, following symlinked directories once, and name files relative to it."""
+    files: list[tuple[str, Path]] = []
+    seen: set[str] = set()
+    for directory, subdirectories, names in os.walk(root, followlinks=True):
+        real = os.path.realpath(directory)
+        if real in seen:
+            subdirectories.clear()
+            continue
+        seen.add(real)
+        subdirectories[:] = sorted(name for name in subdirectories if name != "__pycache__")
+        for name in sorted(names):
+            path = Path(directory) / name
+            if path.is_file() and path.suffix != ".pyc":
+                files.append((path.relative_to(root).as_posix(), path))
+    return files
 
 
 def _sources_sha256(roots: list[Path], config_files: list[Path]) -> str | None:
     """Hash whole trees and declared files. A missing declared file returns None."""
     digest = hashlib.sha256()
-    named = [
-        (path.relative_to(root).as_posix(), path) for root in roots for path in _tree_files(root)
-    ]
+    named = [named_file for root in roots for named_file in _tree_files(root)]
     for path in config_files:
         if not path.is_file():
             return None
@@ -73,9 +82,16 @@ def _sources_sha256(roots: list[Path], config_files: list[Path]) -> str | None:
 
 
 def _dependencies_sha256() -> str:
+    """Hash installed names and versions in site-packages only.
+
+    ``python -m`` puts the working directory on ``sys.path``, so a stray egg-info there must not
+    count. This identifies versions. An edit to an installed package's source goes unseen.
+    """
     installed = sorted(
-        f"{distribution.name}=={distribution.version}"
-        for distribution in importlib.metadata.distributions()
+        {
+            f"{distribution.name}=={distribution.version}"
+            for distribution in importlib.metadata.distributions(path=site.getsitepackages())
+        }
     )
     return hashlib.sha256("\n".join(installed).encode()).hexdigest()
 
