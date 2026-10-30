@@ -1,0 +1,15 @@
+id: results-json-single-writer
+language: python
+severity: error
+message: Only agentic_ml_loop/results.py may name the leaderboard file. Call the engine instead.
+files:
+  - "**/*.py"
+ignores:
+  - src/agentic_ml_loop/results.py
+  - tests/**
+rule:
+  any:
+    - kind: string
+      regex: results\.json
+    - kind: binary_operator
+      regex: (?s)["']results["'].*\+.*["']\.json["']

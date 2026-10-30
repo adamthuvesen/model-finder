@@ -1,0 +1,7 @@
+id: no-dynamic-experiment-import
+valid:
+  - importlib.import_module(module)
+invalid:
+  - __import__(f"lib.{experiment_id}.data", fromlist=["TOTAL_COLUMN"])
+  - importlib.import_module(f"demos.{name}.data")
+  - name = "demos." + suffix

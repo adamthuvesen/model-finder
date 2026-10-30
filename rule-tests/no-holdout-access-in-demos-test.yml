@@ -1,0 +1,11 @@
+id: no-holdout-access-in-demos
+valid:
+  - predict(splits.validation)
+invalid:
+  - predict(splits.test)
+  - predict(splits.holdout)
+  - from agentic_ml_loop.splits import HoldoutSplits
+  - load_sealed_holdout(seal)
+  - getattr(splits, "holdout")
+  - pd.read_parquet(home / ".local/share/agentic-ml-loop/holdouts" / name)
+  - h.sealed_file_path(seal)

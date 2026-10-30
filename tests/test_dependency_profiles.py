@@ -9,7 +9,6 @@ HEAVY_OPTIONAL_PACKAGES = {
     "lightgbm",
     "matplotlib",
     "optuna",
-    "pyarrow",
     "scikit-learn",
     "scipy",
     "shap",

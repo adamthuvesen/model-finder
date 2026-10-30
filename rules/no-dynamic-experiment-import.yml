@@ -1,0 +1,21 @@
+id: no-dynamic-experiment-import
+language: python
+severity: error
+message: The engine must not build an import path at runtime or name the demos package.
+files:
+  - src/**/*.py
+rule:
+  any:
+    - pattern: __import__($$$)
+    - kind: string
+      regex: ^f?["']demos(\.|["'])
+    - all:
+        - kind: call
+        - has:
+            field: function
+            regex: (^|\.)import_module$
+        - has:
+            field: arguments
+            has:
+              kind: string
+              regex: ^f

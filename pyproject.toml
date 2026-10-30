@@ -1,7 +1,7 @@
 [project]
 name = "agentic-ml-loop"
 version = "0.1.0"
-description = "Agent-driven offline model-search loop"
+description = "Native-goal ML experiment engine with sealed holdouts and a verifiable evidence chain"
 readme = "README.md"
 requires-python = ">=3.13"
 license = "Apache-2.0"
@@ -16,8 +16,11 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
+    "pyarrow>=21.0.0",
     "numpy>=2.2.6",
     "pandas>=2.3.3",
+    "pydantic>=2.14.2",
+    "sqlglot>=30.29.0",
 ]
 
 [project.optional-dependencies]
@@ -29,7 +32,6 @@ models = [
     "matplotlib>=3.10.8",
     "optuna>=4.3.0",
     "polars>=1.0.0",
-    "pyarrow>=21.0.0",
     "scikit-learn>=1.7.1",
     "scipy>=1.15.0",
     "seaborn>=0.13.0",
@@ -38,33 +40,24 @@ models = [
     "tqdm>=4.66.0",
     "xgboost>=3.0.4",
 ]
-# Warehouse ingestion (optional, opt-in per warehouse). The default install
-# stays numpy + pandas only; these pull in only when a user installs the extra.
-# `sources` is the shared Arrow base; each warehouse extra is self-contained.
-sources = [
-    "pyarrow>=21.0.0",
-]
+# Warehouse ingestion (optional, opt-in per warehouse). The default install stays free of
+# warehouse clients; these pull in only when a user installs the extra.
 postgres = [
-    "agentic-ml-loop[sources]",
     "adbc-driver-manager>=1.11.0",
     "adbc-driver-postgresql>=1.11.0",
 ]
 snowflake = [
-    "agentic-ml-loop[sources]",
     "adbc-driver-manager>=1.11.0",
     "adbc-driver-snowflake>=1.10.0",
 ]
 bigquery = [
-    "agentic-ml-loop[sources]",
     "adbc-driver-manager>=1.11.0",
     "adbc-driver-bigquery>=1.10.0",
 ]
 databricks = [
-    "agentic-ml-loop[sources]",
     "databricks-sql-connector[pyarrow]>=4.0",
 ]
 redshift = [
-    "agentic-ml-loop[sources]",
     "redshift-connector>=2.1",
 ]
 viz = []
@@ -72,6 +65,9 @@ deep = [
     "agentic-ml-loop[models]",
     "torch>=2.2.0",
 ]
+
+[project.scripts]
+experiment = "agentic_ml_loop.cli.main:main"
 
 [dependency-groups]
 dev = [
@@ -99,13 +95,20 @@ package = true
 default-groups = ["dev"]
 
 [tool.setuptools.packages.find]
-include = ["lib*", "loop*", "runners*"]
+where = ["src"]
+include = ["agentic_ml_loop*"]
 
-[tool.setuptools]
-py-modules = ["experiment"]
+[tool.setuptools.package-data]
+agentic_ml_loop = [
+    "templates/*.md",
+    "viz/renderer/*",
+    "viz/templates/*",
+    "sources/bundles/*/*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-v --tb=short"
 
 [tool.ruff]
@@ -117,49 +120,39 @@ extend-exclude = ["experiments/*/scripts"]
 select = ["E", "F", "I", "B", "UP", "SIM", "S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
 # Line length is enforced by the formatter; don't nag about unsplittable
 # strings, URLs, and f-strings.
-ignore = [
-    "E501",
-    "TRY003",
-    "PLR2004",
-    "PLR0913",
-    "ANN401",
-    # Ratchet: existing findings. Remove each code once its findings are gone.
-    "ANN202",
-    "ARG001",
-    "ARG002",
-    "BLE001",
-    "FBT001",
-    "FBT002",
-    "FBT003",
-    "PERF401",
-    "PLC0415",
-    "PLW0108",
-    "PLW1510",
-    "PLW2901",
-    "PTH105",
-    "PTH123",
-    "RUF001",
-    "RUF022",
-    "RUF043",
-    "RUF046",
-    "RUF100",
-    "S108",
-    "S603",
-    "S607",
-    "SLF001",
-    "T201",
-    "TRY004",
-    "TRY300",
-    "TRY400",
-]
+ignore = ["E501", "TRY003", "PLR2004", "PLR0913", "ANN401"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"anthropic".msg = "No agent SDK. The native goal owns execution."
+"claude_agent_sdk".msg = "No agent SDK. The native goal owns execution."
+"claude_code_sdk".msg = "No agent SDK. The native goal owns execution."
+"openai".msg = "No agent SDK. The native goal owns execution."
+"litellm".msg = "No agent SDK. The native goal owns execution."
+"langchain".msg = "No agent SDK. The native goal owns execution."
+"subprocess".msg = "No process spawn. That is how an agent runner starts."
+"multiprocessing".msg = "No process spawn. That is how an agent runner starts."
+"pty".msg = "No process spawn. That is how an agent runner starts."
+"asyncio.create_subprocess_exec".msg = "No process spawn. That is how an agent runner starts."
+"asyncio.create_subprocess_shell".msg = "No process spawn. That is how an agent runner starts."
+"os.system".msg = "No process spawn. That is how an agent runner starts."
+"os.popen".msg = "No process spawn. That is how an agent runner starts."
+"os.fork".msg = "No process spawn. That is how an agent runner starts."
+"os.forkpty".msg = "No process spawn. That is how an agent runner starts."
+"os.posix_spawn".msg = "No process spawn. That is how an agent runner starts."
+"os.posix_spawnp".msg = "No process spawn. That is how an agent runner starts."
+"os.spawnl".msg = "No process spawn. That is how an agent runner starts."
+"os.spawnv".msg = "No process spawn. That is how an agent runner starts."
+"os.execv".msg = "No process spawn. That is how an agent runner starts."
+"os.execvp".msg = "No process spawn. That is how an agent runner starts."
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S603", "S607", "ANN", "ARG", "PLC0415", "SLF001", "FBT", "T20", "TRY", "PTH123"]
-"experiments/**" = ["S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
-"runners/**" = ["S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
-"lib/pqa*/**" = ["S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
-"lib/expansion*/**" = ["S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
-"lib/demo_*/**" = ["S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
+"tests/**" = ["TID251", "S101", "S108", "S603", "S607", "B010", "ANN", "ARG", "PLC0415", "SLF001", "FBT", "T20", "TRY", "PTH123"]
+"demos/**" = ["S", "BLE", "TRY", "PTH", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
+# The command line is the one place that prints.
+"src/agentic_ml_loop/cli/*.py" = ["T201"]
+# Warehouse clients and pyarrow stay optional, so these imports must stay lazy.
+"src/agentic_ml_loop/sources/*.py" = ["PLC0415"]
+
 [tool.ruff.format]
 quote-style = "double"
 
@@ -169,19 +162,76 @@ typeCheckingMode = "standard"
 venvPath = "."
 venv = ".venv"
 failOnWarnings = false
-strict = ["lib/*.py", "experiment.py", "viz"]
-exclude = ["**/.venv", "**/__pycache__", "examples", "bench"]
+strict = ["src/agentic_ml_loop"]
+include = ["src", "demos", "tests"]
+exclude = ["**/.venv", "**/__pycache__"]
 
 [tool.vulture]
-paths = ["experiment.py", "lib", "viz"]
-min_confidence = 80
-exclude = ["lib/pqa*", "lib/expansion*"]
+paths = ["src", "demos"]
+min_confidence = 60
+ignore_decorators = ["@model_validator", "@field_validator"]
+# Serialized Pydantic fields, the console script, torch's forward, and the public helpers
+# that experiment scripts call. Vulture sees none of these callers.
+ignore_names = [
+    "model_config", "schema_version", "config_files", "train_target_mean", "validation_target_mean", "holdout_target_concern", "event", "experiment_name", "recorded_at", "provenance_note", "train_validation_exact_rows", "search_holdout_exact_rows", "train_validation_keys", "search_holdout_keys", "limitations", "status", "split_strategy", "reviewer",
+    "resealed_at", "python", "pulled_at", "prior_holdouts", "manifest_version", "finished_at",
+    "exploratory_run_ids", "dependencies_sha256", "conclusion", "completed_at", "algorithm",
+    "acknowledged_prior_holdouts", "forward", "main", "outputs_dir", "work_dir", "scripts_dir", "save_completion",
+]
 
 [tool.deptry]
-extend_exclude = ["experiments", "examples", "evals", "bench", "lib/external_targets"]
+extend_exclude = ["experiments", "examples"]
 
 [tool.deptry.per_rule_ignores]
 DEP002 = ["catboost", "duckdb", "joblib", "matplotlib", "optuna", "polars", "scipy", "seaborn", "shap", "statsmodels", "tqdm", "adbc-driver-manager", "adbc-driver-postgresql", "adbc-driver-snowflake", "adbc-driver-bigquery", "databricks-sql-connector", "redshift-connector"]
+
+[tool.importlinter]
+root_packages = ["agentic_ml_loop", "demos"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+id = "engine-independent-of-demos"
+name = "The engine never imports demos"
+type = "forbidden"
+source_modules = ["agentic_ml_loop"]
+forbidden_modules = ["demos"]
+
+[[tool.importlinter.contracts]]
+id = "engine-layers"
+name = "CLI above domain above I/O"
+type = "layers"
+containers = ["agentic_ml_loop"]
+exhaustive = true
+layers = [
+    "cli",
+    "completion : viz",
+    "final_evaluation : runner",
+    "data_audit : validation",
+    "sources",
+    "run_evidence : holdout : spec",
+    "results : ledger",
+    "candidate_result",
+    "splits",
+    "io : paths",
+]
+
+[[tool.importlinter.contracts]]
+id = "demos-cannot-reach-holdout-store"
+name = "Demos do not import the holdout store"
+type = "forbidden"
+source_modules = ["demos"]
+forbidden_modules = ["agentic_ml_loop.holdout", "agentic_ml_loop.ledger", "agentic_ml_loop.final_evaluation"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "no-agent-runtime"
+name = "The engine and demos import no agent SDK"
+type = "forbidden"
+source_modules = ["agentic_ml_loop", "demos"]
+forbidden_modules = ["anthropic", "openai", "claude_agent_sdk", "claude_code_sdk", "langchain", "litellm"]
+
 [tool.coverage.run]
-source = ["lib", "viz", "experiment"]
-omit = ["lib/pqa*/*", "lib/expansion*/*"]
+source = ["agentic_ml_loop", "demos"]
+
+[tool.coverage.report]
+precision = 2

@@ -1,0 +1,24 @@
+id: pydantic-extra-forbid
+language: python
+severity: error
+message: A Pydantic model must set extra="forbid", and no subclass may relax it.
+files:
+  - src/**/*.py
+  - demos/**/*.py
+rule:
+  any:
+    - all:
+        - kind: class_definition
+        - has:
+            field: superclasses
+            has:
+              regex: ^(pydantic\.)?BaseModel$
+        - not:
+            has:
+              field: body
+              has:
+                kind: expression_statement
+                regex: (?s)^model_config\s*=.*extra\s*=\s*"forbid"
+    - all:
+        - kind: expression_statement
+        - regex: (?s)^model_config\s*=.*extra\s*=\s*"(allow|ignore)"

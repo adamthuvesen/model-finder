@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from lib.io import write_json
+from agentic_ml_loop.io import write_json
 
 
 class TestWriteJson:

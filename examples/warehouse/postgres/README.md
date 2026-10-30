@@ -10,7 +10,7 @@ demo: a real database server with zero committed secrets.
 docker compose -f examples/warehouse/postgres/docker-compose.yml up -d
 
 uv sync --extra postgres
-python -m lib.sources pull \
+uv run experiment pull \
   --experiment experiments/<your_experiment> \
   --source postgres \
   --uri "postgresql://demo_ro@localhost:5432/demo" \
@@ -26,13 +26,13 @@ query. Nothing secret is stored anywhere.
 
 ## Reading the snapshot
 
-The experiment's `lib/<slug>/data.py` loads the frozen snapshot offline and
+The experiment's `data.py` loads the frozen snapshot offline and
 checks it against the manifest:
 
 ```python
 from pathlib import Path
 
-from lib.sources import read_snapshot
+from agentic_ml_loop.sources import read_snapshot
 
 EXPERIMENT_DIR = Path("experiments/<your_experiment>")
 

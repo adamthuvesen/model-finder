@@ -1,0 +1,8 @@
+id: results-json-single-writer
+valid:
+  - results = load_results(experiment_dir)
+  - journal = experiment_dir / "research_journal.md"
+invalid:
+  - write_json(experiment_dir / "results.json", [])
+  - path = experiment_dir / "results.json"
+  - path = experiment_dir / ("results" + ".json")

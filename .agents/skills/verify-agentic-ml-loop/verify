@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# Drives the real CLI offline with a temp HOME and data home. Evidence survives cleanup.
+set -u
+ROOT="$(git rev-parse --show-toplevel)"
+STATE="$ROOT/.verify/state"
+SHA="$(git -C "$ROOT" rev-parse --short HEAD)"
+DIRTY="$([ -n "$(git -C "$ROOT" status --porcelain)" ] && echo true || echo false)"
+RUN_POINTER="$STATE/run_dir"
+REAL_STORE="${HOME}/.local/share/agentic-ml-loop"
+
+# VERIFY_TARGET exists only to prove that doctor rejects an undeclared data home.
+target() { echo "${VERIFY_TARGET:-$STATE/home/.local/share}"; }
+run_dir() { cat "$RUN_POINTER"; }
+
+in_env() {
+  env HOME="$STATE/home" XDG_DATA_HOME="$(target)" PATH="$ROOT/.venv/bin:/usr/bin:/bin" \
+    PYTHONPATH="$ROOT" "$@"
+}
+
+record() { # feature entry exit result command
+  {
+    printf 'feature: %s\nentry: %s\ncommand: %s\nexit: %s\nresult: %s\n' "$1" "$2" "$5" "$3" "$4"
+    printf 'target: %s\nsha: %s\ndirty: %s\nstarted: %s\n\n' "$(target)" "$SHA" "$DIRTY" \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >>"$(run_dir)/manifest.yml"
+}
+
+launch() {
+  [ -d "$STATE" ] && rm -rf "$STATE"
+  mkdir -p "$STATE/home/.local/share" "$STATE/experiments"
+  local suffix=""
+  [ "$DIRTY" = true ] && suffix="-dirty"
+  local dir="$ROOT/.verify/runs/$(date -u +%Y%m%dT%H%M%SZ)-$SHA$suffix"
+  mkdir -p "$dir"
+  echo "$dir" >"$RUN_POINTER"
+  ls -A "$REAL_STORE" 2>/dev/null | sort >"$STATE/real_store_before" || true
+  echo "ready: $dir"
+}
+
+doctor() {
+  [ -f "$RUN_POINTER" ] || { echo "doctor: run launch first" >&2; return 1; }
+  case "$(target)" in
+    "$STATE"/*) ;;
+    *) echo "doctor: data home $(target) is not this run's temp directory" >&2; return 1 ;;
+  esac
+  in_env "$ROOT/.venv/bin/experiment" sources list >/dev/null \
+    || { echo "doctor: experiment script does not run from this checkout" >&2; return 1; }
+  local origin
+  origin="$(in_env "$ROOT/.venv/bin/python" -c 'import agentic_ml_loop; print(agentic_ml_loop.__file__)')"
+  case "$origin" in
+    "$ROOT"/*) echo "doctor: ok ($origin)" ;;
+    *) echo "doctor: engine resolves to $origin, not this checkout" >&2; return 1 ;;
+  esac
+}
+
+demo() { in_env "$ROOT/.venv/bin/python" -m demos.demo_bootstrap "$@"; }
+experiment_cli() { in_env "$ROOT/.venv/bin/experiment" "$@"; }
+
+check() { # feature entry expected_exit expected_text command...
+  local feature="$1" entry="$2" expected="$3" text="$4"
+  shift 4
+  local out="$(run_dir)/$feature.out" err="$(run_dir)/$feature.err" code=0
+  "$@" >"$out" 2>"$err" || code=$?
+  local result=pass
+  [ "$code" = "$expected" ] || result=fail
+  grep -q -- "$text" "$out" "$err" || result=fail
+  grep -q Traceback "$err" && result=fail
+  record "$feature" "$entry" "$code" "$result" "${VERIFY_SHOWN:-$*}"
+  echo "$feature: $result (exit $code)"
+  [ "$result" = pass ]
+}
+
+drive() {
+  local x="$STATE/experiments/run_a"
+  case "${1:-}" in
+    seal-workspace)
+      check seal-workspace init-demo 0 "Sealed 160 holdout rows" demo init-demo --experiment "$x" || return 1
+      ls "$(target)"/agentic-ml-loop/holdouts/*/holdout-*.parquet >/dev/null || { echo "no sealed file" >&2; return 1; }
+      local rows
+      rows="$(in_env "$ROOT/.venv/bin/python" -c "import pandas as p,sys;print(sum(len(p.read_parquet(f'$x/data/{n}.parquet')) for n in ('train','validation')))")"
+      echo "workspace rows: $rows" | tee "$(run_dir)/seal-workspace.rows"
+      [ "$rows" = 640 ]
+      ;;
+    search-metrics)
+      check search-metrics run-candidate 0 "val_auc" demo run-candidate --experiment "$x" --candidate logreg-tiny || return 1
+      in_env "$ROOT/.venv/bin/python" -c "import json;assert all(set(e['metrics'])=={'train','validation'} for e in json.load(open('$x/results.json')))"
+      ;;
+    final-before-freeze)
+      check final-before-freeze evaluate-final 1 "No frozen selection" demo evaluate-final --experiment "$x"
+      ;;
+    final-after-freeze)
+      check final-freeze freeze-candidate 0 "selected_result" demo freeze-candidate --experiment "$x" --candidate logreg-tiny || return 1
+      check final-after-freeze evaluate-final 0 "holdout_sha256" demo evaluate-final --experiment "$x" || return 1
+      check final-search-blocked run-candidate 1 "Selection is frozen" demo run-candidate --experiment "$x" --candidate logreg-tiny
+      ;;
+    reseal)
+      in_env "$ROOT/.venv/bin/python" -c "
+import numpy as np, pandas as pd
+from demos.demo_bootstrap.generate_data import generate_demo_bootstrap_dataset as g
+g(n_rows=80, seed=901).assign(event_date=pd.date_range('2027-01-01', periods=80)).to_parquet('$STATE/new_rows.parquet', index=False)"
+      check reseal reseal 0 "Sealed 80 new rows" experiment_cli reseal --experiment "$x" --rows "$STATE/new_rows.parquet" --note "Verification run" || return 1
+      [ -f "$x/work/holdout_history/0001/consumed.json" ] || { echo "no history" >&2; return 1; }
+      check reseal-warning validate 0 "holdouts retired" experiment_cli validate "$x"
+      ;;
+    replay)
+      check replay replay 0 "replay.html" experiment_cli replay "$x" || return 1
+      cp "$x/outputs/replay.html" "$(run_dir)/replay.html"
+      grep -q logreg-tiny "$(run_dir)/replay.html"
+      ;;
+    missing-experiment)
+      check missing-experiment run-candidate 1 "does not exist" demo run-candidate --experiment "$STATE/experiments/absent" --candidate logreg-tiny
+      ;;
+    *) echo "unknown feature: ${1:-}" >&2; return 2 ;;
+  esac
+}
+
+control() {
+  # The mutated assertion expects exit 0. The real exit is 1, so this drive must FAIL.
+  if check control-probe evaluate-final 0 "does not exist" demo evaluate-final --experiment "$STATE/experiments/absent"; then
+    record control:missing-experiment evaluate-final 0 passed-unexpectedly "expected exit 0"
+    echo "control: passed-unexpectedly" >&2
+    return 1
+  fi
+  record control:missing-experiment evaluate-final 1 fail-observed "expected exit 0, actual exit 1"
+  echo "control: fail-observed"
+}
+
+clean() {
+  local dir tripwire=empty
+  dir="$(run_dir)"
+  ls -A "$REAL_STORE" 2>/dev/null | sort >"$STATE/real_store_after" || true
+  diff -q "$STATE/real_store_before" "$STATE/real_store_after" >/dev/null || tripwire="changed: $REAL_STORE"
+  echo "$tripwire" >"$dir/tripwire"
+  rm -rf "$STATE"
+  echo "evidence: $dir (tripwire: $tripwire)"
+}
+
+case "${1:-}" in
+  launch) launch ;;
+  reset) launch ;;
+  doctor) doctor ;;
+  drive) shift; drive "$@" ;;
+  control) control ;;
+  clean) clean ;;
+  exec) shift; [ "${1:-}" = "--" ] && shift; in_env "$@" ;;
+  *) echo "usage: verify launch|doctor|reset|drive <feature>|control|clean|exec -- <command>" >&2; exit 2 ;;
+esac

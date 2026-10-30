@@ -58,16 +58,16 @@
 
   <script id="script-data" type="application/json">{
   "experiment": {
-    "name": "Autonomous Research Agent: Bootstrap Demo \u2014 Trial Conversion (Synthetic)",
+    "name": "Autonomous Research Agent: Trial Conversion (Synthetic)",
     "metric": "val_auc",
-    "objective": "Smoke-test the agentic-ml-loop stack (runner, validation, loop prompts."
+    "objective": "Smoke-test the agentic-ml-loop engine (runner, sealed holdout, validation."
   },
   "scenes": [
     {
       "type": "intro",
       "station": "desk",
       "title": "Understanding the Goal",
-      "text": "Smoke-test the agentic-ml-loop stack (runner, validation, loop prompts.",
+      "text": "Smoke-test the agentic-ml-loop engine (runner, sealed holdout, validation.",
       "subtitle": "Measuring: ranking quality"
     },
     {
@@ -696,63 +696,27 @@
       "leaderboard": [
         {
           "name": "logreg-poly",
-          "score": 0.608,
-          "primary_metric": {
-            "name": "val_auc",
-            "label": "validation auc",
-            "value": 0.608,
-            "family": "classification"
-          }
+          "score": 0.608
         },
         {
           "name": "lgbm-conservative",
-          "score": 0.602,
-          "primary_metric": {
-            "name": "val_auc",
-            "label": "validation auc",
-            "value": 0.602,
-            "family": "classification"
-          }
+          "score": 0.602
         },
         {
           "name": "logreg-minimal",
-          "score": 0.601,
-          "primary_metric": {
-            "name": "val_auc",
-            "label": "validation auc",
-            "value": 0.601,
-            "family": "classification"
-          }
+          "score": 0.601
         },
         {
           "name": "logreg-engineered",
-          "score": 0.596,
-          "primary_metric": {
-            "name": "val_auc",
-            "label": "validation auc",
-            "value": 0.596,
-            "family": "classification"
-          }
+          "score": 0.596
         },
         {
           "name": "logreg-tiny",
-          "score": 0.593,
-          "primary_metric": {
-            "name": "val_auc",
-            "label": "validation auc",
-            "value": 0.593,
-            "family": "classification"
-          }
+          "score": 0.593
         },
         {
           "name": "majority-baseline",
-          "score": 0.5,
-          "primary_metric": {
-            "name": "val_auc",
-            "label": "validation auc",
-            "value": 0.5,
-            "family": "classification"
-          }
+          "score": 0.5
         }
       ],
       "summary": null
@@ -3386,7 +3350,7 @@ class ScenePlayer {
       ctx.fillStyle = '#ecf0f1';
       ctx.font = '14px monospace';
       ctx.fillText('No script data loaded.', 20, H / 2);
-      ctx.fillText('Run: python viz/generate.py experiments/<id>', 20, H / 2 + 20);
+      ctx.fillText('Run: experiment replay experiments/<id>', 20, H / 2 + 20);
       return;
     }
 

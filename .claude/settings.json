@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(~/.local/share/agentic-ml-loop/**)",
+      "Edit(~/.local/share/agentic-ml-loop/**)",
+      "Bash(*agentic-ml-loop/holdouts*)"
+    ]
+  }
+}

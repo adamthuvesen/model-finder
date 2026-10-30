@@ -1,90 +1,73 @@
-# AGENTS.md - Agentic ML Loop
+# AGENTS.md
 
-`agentic-ml-loop` is a local, offline model-search harness for agent-driven ML
-experiments. The main unit of work is an experiment under `experiments/<experiment_id>/`.
-
-This file holds project-specific facts for coding agents.
+`agentic-ml-loop` is a model-search engine for an agent running under a native client `/goal`.
+The client owns continuation. This repo owns the evidence: search rows, a sealed holdout,
+run records, and a completion check. Docs: [architecture](.agents/docs/architecture.md),
+[evidence](docs/evidence.md), [why native goals](.agents/docs/decisions/native-goals.md).
 
 ## Layout
 
-```
-experiment.py     Experiment validation + shared helpers
-program.md        Research principles + ML craft, read by each cycle
-guidelines.md     Operational rules injected into cycle prompts
-loop/             Long-running supervisor and runner invocation
-runners/          Demo runner entrypoints
-lib/              Shared modules (paths.py -> outputs/work/scripts; io, eval, schemas)
-experiments/      One dir per experiment; <experiment_id>/ holds all its files
-.agents/skills/   Portable local skills for experiment setup and notebooks
-.agents/docs/     Subsystem docs; see Index
+```text
+src/agentic_ml_loop/  The engine. The `experiment` console script lives in cli/.
+demos/                Free, offline demos. They import the engine. It never imports them.
+experiments/<id>/     One experiment: spec, journal, sources, leaderboard, data, outputs.
+rules/, rule-tests/   ast-grep rules and their tests.
+.agents/skills/       research, experiment-spec, verify-agentic-ml-loop.
 ```
 
-## Quickstart
+## Commands
 
 ```bash
-uv run python experiment.py validate experiments/<experiment_id>   # add --strict-completion for completion checks
-uv run python -m loop start experiments/<experiment_id>            # also: resume, status; --max-cycles N
-uv run --extra models python runners/<experiment_id>_runner.py run-candidate --experiment experiments/<experiment_id> --candidate <id>
-uv run --extra models python runners/demo_bootstrap_runner.py init-demo --force
-
-# Full offline gate, the same one CI runs:
-make check
+make check                                       # the gate; CI runs the same targets
+uv run --extra models python -m demos.demo_bootstrap init-demo --experiment experiments/my_run
+uv run --extra models python -m demos.demo_bootstrap run-candidate --experiment experiments/my_run --candidate logreg-tiny
+uv run experiment validate experiments/my_run
 ```
 
-## Critical Conventions
+Prove user-facing changes with the `verify-agentic-ml-loop` skill at
+`.agents/skills/verify-agentic-ml-loop/`.
 
-- **`experiment.md` is a spec, not scratch.** Do not mutate
-  `experiments/<experiment_id>/experiment.md` unless the human explicitly asks for
-  a spec rewrite.
-- **New code lands per-experiment.** Write new scripts under
-  `experiments/<experiment_id>/scripts/`; keep long-lived modules in
-  `lib/<experiment_id>/`.
-- **Runner presets grant shell access without prompting**, because cycles run
-  unattended. They name the tools and keep each CLI's sandbox where it exists.
-  Read [runners.md](.agents/docs/runners.md) before changing them.
-- **Never commit secrets, `.env`, generated notebooks, or local data.**
+## Conventions
 
-## Operating Principles
+- `experiment.md` is a spec. Change it only when the human asks. A change starts a new comparison.
+- Write one-shot scripts under `experiments/<id>/scripts/`.
+- Code for one experiment stays out of the engine. Nothing specific to one company enters this repo.
+- Never commit secrets, `.env`, generated notebooks, or local data.
+- If a doc disagrees with code, fix the doc in the same change.
+- Keep torch and the GBDT libraries in separate processes. Together they can deadlock on OpenMP on macOS.
+- With a custom `XDG_DATA_HOME`, call `.venv/bin` directly. `uv run` stores its Python there and rebuilds `.venv`.
 
-- Optimize for reproducible offline evaluation.
-- Prefer clear baselines and trustworthy comparisons over tiny score chasing.
-- Respect the split policy and leakage constraints in
-  `experiments/<experiment_id>/experiment.md`.
-- One loop cycle should complete one bounded hypothesis test.
-- Read `experiments/<experiment_id>/research_journal.md`,
-  `research_sources.md`, `experiment.md`, and `results.json` before deciding what
-  to do next.
-- Write the cycle hypothesis to `research_journal.md` before running code, then
-  record the result and implications.
+## Stop and ask
 
-## Loop Contract
+A task's wording cannot authorize any of these. Stop, say which recorded rule the request
+reverses, and offer the option that keeps the boundary: select on validation, then run
+`freeze-candidate` and `evaluate-final`.
 
-Each cycle ends by writing its status to
-`experiments/<experiment_id>/cycles/<cycle_id>/cycle_status.json`. The cycle
-prompt names the absolute path.
+- A holdout metric in search results.
+- Selection by holdout. Replace a read holdout with `experiment reseal` and unseen rows. The old
+  estimate stays exploratory, and the ledger and history record it.
+- An agent runner, an agent SDK, or a spawned coding agent. The native goal runs the agent.
+- An edit to a check, rule, or contract that would allow one of these.
 
-```json
-{"status": "CYCLE_DONE"}
-```
+## Enforced rules
 
-- `CYCLE_DONE`: continue the experiment.
-- `EXPERIMENT_COMPLETE`: genuinely done.
+"Honest code" means the check stops a normal path. Deliberate code can still get past it.
 
-The supervisor clears that file before every attempt and reads nothing else, so
-naming these values in the journal is safe. A missing file fails the attempt.
-
-## Read The Docs First
-
-Before editing a subsystem, read the matching doc:
-
-- **Architecture / cycle anatomy**: [architecture.md](.agents/docs/architecture.md)
-- **Runner config / model aliases / effort flags**: [runners.md](.agents/docs/runners.md)
-
-If a doc disagrees with code, fix the doc in the same change.
-
-## Index
-
-Start in [architecture.md](.agents/docs/architecture.md). Before using the loop
-on real data, prove the setup against a bundled demo:
-`experiments/demo_bootstrap/`, `experiments/demo_classification/`,
-`experiments/demo_regression/`, `experiments/demo_deep/` (requires `--extra deep`).
+| Rule | Enforced by | Strength | Added |
+| --- | --- | --- | --- |
+| Search results hold no holdout metric | `SearchMetrics` and name checks in `candidate_result.py` | Hard for split keys; honest code for names, since a neutral name passes | 2026-11-04 |
+| Candidate code receives no holdout rows | `SearchSplits` type, `no-holdout-access-in-demos`, `demos-cannot-reach-holdout-store` | Honest code: a script can still read the file | 2026-11-04 |
+| Holdout rows stay outside the workspace | `holdout.py`, pull refusal, deny rule in `.claude/settings.json` | Honest code | 2026-11-04 |
+| Selection comes before holdout evaluation | `evaluate_final` | Hard in the engine | 2026-11-04 |
+| A sealed file is read at most once, in any experiment | Ledger keyed by file hash, `claim_for_evaluation` | Limit: a new-seed resplit or schema change makes a different file, so a different holdout. Limit: the ledger is a plain file, and a deliberate agent can edit it | 2026-11-04 |
+| Retiring a holdout leaves a record | `reseal_holdout`, `complete-check` | Hard, while the workspace history exists | 2026-11-04 |
+| A claim binds to real freeze, final, and ledger evidence | `_final_evidence_errors`, `_require_ledger_chain` | Hard, short of editing the ledger | 2026-11-04 |
+| Shared rows are reported and acknowledged | `data_audit.py`, `complete-check` | Report only: plain comparison and declared keys, so a cast reads as not comparable | 2026-11-04 |
+| Only the engine writes the leaderboard | `results-json-single-writer`, `results-json-engine-only` | Honest code | 2026-11-04 |
+| Seed, bootstrap count, and gap are declared | `CandidateResult` strict fields | Hard for engine writes | 2026-11-04 |
+| Models reject unknown fields | `pydantic-extra-forbid` | Lint | 2026-11-04 |
+| The engine never imports demos | `engine-independent-of-demos`, `no-dynamic-experiment-import` | Hard for imports; honest code for runtime paths | 2026-11-04 |
+| CLI above domain above I/O | `engine-layers` | Hard | 2026-11-04 |
+| No agent SDK or spawned process | Ruff `TID251`, `no-agent-runtime` rule and contract | Honest code: `getattr(os, ...)` passes | 2026-11-04 |
+| Pulls are read-only and reproducible | `require_read_only_query`, `require_deterministic_query`, `verify_snapshot` | Defence in depth: the warehouse role is the real guard | 2026-11-04 |
+| Engine code passes strict types | `make types` | Hard | 2026-11-04 |
