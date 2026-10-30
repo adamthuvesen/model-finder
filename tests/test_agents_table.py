@@ -42,7 +42,8 @@ def _defines(path: Path, name: str) -> bool:
         ".yml": rf"^id:\s*{escaped}\s*$",
         "": rf"^{escaped}:",
     }
-    pattern = patterns.get(path.suffix)
+    is_python_script = not path.suffix and path.read_text().startswith("#!/usr/bin/env python")
+    pattern = patterns[".py"] if is_python_script else patterns.get(path.suffix)
     return pattern is not None and re.search(pattern, path.read_text(), re.MULTILINE) is not None
 
 

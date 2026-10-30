@@ -1,49 +1,45 @@
 ---
 name: verify-model-finder
-description: Drives the model-finder CLI offline through a real demo run and writes evidence. Use to run, launch, drive, or verify model-finder, or to prove a change to it works.
+description: Drives the real model-finder CLI and demo runner offline, and keeps evidence. Use to run, launch, drive, or verify model-finder, or to prove a change to it works.
 ---
 
 # Verify model-finder
 
-The surface is a short-lived CLI: `experiment` and `python -m demos.<id>`. Every run is free and
-offline, and it uses a temp HOME and data home. Install first with `uv sync --extra models --extra deep`.
+The surface is a short-lived CLI: `experiment` and `python -m demos.<id>`. Each drive runs it in its
+own temp HOME and data home, offline, on CPU. Run `make setup` first.
 
-## Launch / Reset
+## Run
 
-`verify launch` creates the temp home and the run directory, and prints `ready: <run dir>`. There is
-no server. `verify reset` is the same as a fresh launch.
+- `make prove` after a change. It runs the drives that cover files changed against `main`, plus
+  uncommitted and untracked files, or the smoke drive when nothing matches.
+- `make prove ARGS=all` before handing over larger work. Drives run in parallel, about 25s.
+- `make prove ARGS=list` shows the drives. `make prove ARGS="<drive> ..."` runs named drives.
+- `make prove ARGS=control` re-drives one check against a wrong exit code. It exits 0 only when it
+  observes FAIL.
 
-## Doctor
+The helper is `.agents/skills/verify-model-finder/verify`. The drives live in `drives.py` beside it.
 
-`verify doctor` exits non-zero when the data home is outside this run's temp directory, when the
-`experiment` script does not run, or when the engine resolves outside this checkout.
+## Reading results
 
-## Drive
+Each drive prints `PASS|FAIL <drive> <seconds>s <detail>`. A FAIL names the step, the expected exit
+and text, and the last line the command printed. The run ends with `evidence: <dir>`. That is
+`.verify/runs/<utc>-<sha7>[-dirty]/`, with one folder per drive holding each step's `.cmd`, `.out`,
+`.err`, and `.exit`, plus `summary.json`. The helper does not retry, so there is no FLAKY result.
 
-`verify drive <feature-id>` runs one sub-feature. The session is `launch`, `doctor`, the drives in the
-order that [features/README.md](features/README.md) lists, `control`, `clean`. Drives build on one
-experiment, so the order matters. Assertions use exit codes and exact strings.
+A `tripwire` FAIL means the run called `claude`, `codex`, `modal`, or another stub on `PATH`, or it
+changed the real holdout store or `~/.config/model-finder/sources.json`.
 
-## Evidence
+## Limits
 
-The run directory is `.verify/runs/<utc>-<sha7>[-dirty]/`. Each drive writes `<feature>.out`,
-`<feature>.err`, and a `manifest.yml` block, and some add a second read such as a row count or
-`replay.html`. No drive handles a secret.
+- No drive pulls from a warehouse or seals a snapshot (`experiment pull`, `experiment seal`).
+  `tests/test_sources.py` covers those with DuckDB.
+- The torch and GBDT demos are not driven here. `make verify` runs them in `tests/verify`.
+- The guard is driven only through the Codex hook. The Cursor and Claude Code clients are not run.
 
-- **Control.** `verify control` re-drives `evaluate-final` on a missing experiment and expects exit 0.
-  The real exit is 1, so the manifest must show `result: fail-observed`.
+## Gotchas
 
-## Cleanup
-
-`verify clean` writes `tripwire` to the run directory, removes `.verify/state/`, and leaves the
-evidence. The tripwire must read `empty`. Otherwise the run changed the real holdout store.
-
-## Helper
-
-- `verify launch`, `verify reset`: create the temp environment.
-- `verify doctor`: check the environment and build identity.
-- `verify drive <feature-id>`: run one sub-feature.
-- `verify control`: run the mutated assertion.
-- `verify clean`: stop and record the tripwire.
-- `verify exec -- <command>`: run a command in the isolated environment.
-- `VERIFY_TARGET`: overrides the data home, only to prove that doctor rejects it.
+- `uv build` and `uv pip install` run with the real HOME, because uv keeps its managed Python and
+  cache there. They run with `--offline`, so a cold uv cache fails the `wheel` drive. Run `make setup`.
+- The first import in a new venv can take 10s on macOS. The `wheel` drive pays this on every run.
+- `complete`, `reseal`, and `replay` copy one demo experiment that the run builds once. The copy
+  works because the experiment and the holdout store hold no absolute paths.

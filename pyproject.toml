@@ -3,7 +3,7 @@ name = "model-finder"
 version = "0.1.0"
 description = "Native-goal ML experiment engine with sealed holdouts and a verifiable evidence chain"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 license = "Apache-2.0"
 authors = [{ name = "Adam Thuvesen" }]
 keywords = ["agents", "machine-learning", "experimentation", "offline-evaluation"]
@@ -12,7 +12,7 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
@@ -120,7 +120,7 @@ addopts = "-v --tb=short"
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
@@ -161,6 +161,8 @@ ignore = ["E501", "TRY003", "PLR2004", "PLR0913", "ANN401"]
 # The command line is the one place that prints.
 "src/model_finder/cli/*.py" = ["T201"]
 "scripts/**" = ["S603", "TID251", "T201"]
+".agents/skills/*/verify" = ["S603", "S607", "TID251", "T201"]
+".agents/skills/*/drives.py" = ["S603", "S607", "TID251"]
 # Warehouse clients and pyarrow stay optional, so these imports must stay lazy.
 "src/model_finder/sources/*.py" = ["PLC0415"]
 
@@ -169,7 +171,7 @@ quote-style = "double"
 exclude = ["experiments/**"]
 
 [tool.basedpyright]
-pythonVersion = "3.13"
+pythonVersion = "3.14"
 typeCheckingMode = "standard"
 venvPath = "."
 venv = ".venv"

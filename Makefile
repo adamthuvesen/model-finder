@@ -4,7 +4,7 @@ RUN := uv run --locked --extra models --extra deep
 # `databricks` extra installs. Remove these when the connector allows the fixed versions.
 REVIEWED_VULNS := --ignore-vuln CVE-2026-49272 --ignore-vuln PYSEC-2026-4114 --ignore-vuln PYSEC-2026-3925 --ignore-vuln PYSEC-2026-3926 --ignore-vuln PYSEC-2026-3927
 
-.PHONY: setup quick fast verify check audit lock lint types boundaries rules deps dead test workflows secrets vulnerabilities
+.PHONY: setup quick fast verify prove check audit lock lint types boundaries rules deps dead test workflows secrets vulnerabilities
 
 # After a clone or a lockfile change. CI runs the same command.
 setup:
@@ -24,6 +24,10 @@ fast:
 verify:
 	@test -f .coverage || { echo "verify: no .coverage from the fast tests. Fix: run make fast first" >&2; exit 1; }
 	$(RUN) pytest --quiet -n auto tests/verify --cov --cov-append --cov-fail-under=89
+
+# Drive the real CLI offline and keep evidence in .verify/runs/. ARGS: all, list, control, or drive names.
+prove:
+	@.agents/skills/verify-model-finder/verify $(ARGS)
 
 # The full offline gate, as CI runs it.
 check: fast verify

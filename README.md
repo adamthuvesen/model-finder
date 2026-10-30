@@ -1,6 +1,6 @@
 # Model Finder
 
-![License](https://img.shields.io/github/license/adamthuvesen/model-finder) ![Python](https://img.shields.io/badge/python-3.13%2B-blue)
+![License](https://img.shields.io/github/license/adamthuvesen/model-finder) ![Python](https://img.shields.io/badge/python-3.14%2B-blue)
 
 A model-search engine for a coding agent running under a native client `/goal`.
 The client keeps the agent going. This repo makes the result trustworthy:
@@ -19,7 +19,7 @@ rerun candidates in a new experiment.
 
 ## Try it offline
 
-Requires Python 3.13+ and `uv`. This costs nothing and calls no LLM.
+Requires Python 3.14+ and `uv`. This costs nothing and calls no LLM.
 
 ```bash
 uv sync --extra models

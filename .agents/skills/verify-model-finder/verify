@@ -1,178 +1,208 @@
-#!/usr/bin/env bash
-# Drives the real CLI offline with a temp HOME and data home. Evidence survives cleanup.
-set -u
-ROOT="$(git rev-parse --show-toplevel)"
-STATE="$ROOT/.verify/state"
-SHA="$(git -C "$ROOT" rev-parse --short HEAD)"
-DIRTY="$([ -n "$(git -C "$ROOT" status --porcelain)" ] && echo true || echo false)"
-RUN_POINTER="$STATE/run_dir"
-REAL_STORE="${HOME}/.local/share/model-finder"
+#!/usr/bin/env python3
+"""Drive the real model-finder CLI offline, one temp HOME per drive. Evidence stays in .verify/runs/."""
 
-# VERIFY_TARGET exists only to prove that doctor rejects an undeclared data home.
-target() { echo "${VERIFY_TARGET:-$STATE/home/.local/share}"; }
-run_dir() { cat "$RUN_POINTER"; }
+from __future__ import annotations
 
-in_env() {
-  env HOME="$STATE/home" XDG_DATA_HOME="$(target)" PATH="$ROOT/.venv/bin:/usr/bin:/bin" \
-    PYTHONPATH="$ROOT" "$@"
-}
+import atexit
+import json
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import UTC, datetime
+from pathlib import Path
 
-record() { # feature entry exit result command
-  {
-    printf 'feature: %s\nentry: %s\ncommand: %s\nexit: %s\nresult: %s\n' "$1" "$2" "$5" "$3" "$4"
-    printf 'target: %s\nsha: %s\ndirty: %s\nstarted: %s\n\n' "$(target)" "$SHA" "$DIRTY" \
-      "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  } >>"$(run_dir)/manifest.yml"
-}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from drives import (
+    BIN,
+    DRIVES,
+    LIVE,
+    ROOT,
+    SHARED,
+    SMOKE,
+    Ctx,
+    DriveFailure,
+    Fixture,
+    check_missing_experiment,
+    git,
+    kill_group,
+)
 
-launch() {
-  [ -d "$STATE" ] && rm -rf "$STATE"
-  mkdir -p "$STATE/home/.local/share" "$STATE/experiments"
-  local suffix=""
-  [ "$DIRTY" = true ] && suffix="-dirty"
-  local dir="$ROOT/.verify/runs/$(date -u +%Y%m%dT%H%M%SZ)-$SHA$suffix"
-  mkdir -p "$dir"
-  echo "$dir" >"$RUN_POINTER"
-  ls -A "$REAL_STORE" 2>/dev/null | sort >"$STATE/real_store_before" || true
-  echo "ready: $dir"
-}
+REAL_STORE = Path.home() / ".local" / "share" / "model-finder"
+REAL_SOURCES = Path.home() / ".config" / "model-finder" / "sources.json"
+TRIPWIRE_TOOLS = ("claude", "codex", "cursor-agent", "modal", "launchctl", "brew", "op")
 
-doctor() {
-  [ -f "$RUN_POINTER" ] || { echo "doctor: run launch first" >&2; return 1; }
-  case "$(target)" in
-    "$STATE"/*) ;;
-    *) echo "doctor: data home $(target) is not this run's temp directory" >&2; return 1 ;;
-  esac
-  in_env "$ROOT/.venv/bin/experiment" sources list >/dev/null \
-    || { echo "doctor: experiment script does not run from this checkout" >&2; return 1; }
-  local origin
-  origin="$(in_env "$ROOT/.venv/bin/python" -c 'import model_finder; print(model_finder.__file__)')"
-  case "$origin" in
-    "$ROOT"/*) echo "doctor: ok ($origin)" ;;
-    *) echo "doctor: engine resolves to $origin, not this checkout" >&2; return 1 ;;
-  esac
-}
 
-demo() { in_env "$ROOT/.venv/bin/python" -m demos.demo_bootstrap "$@"; }
-experiment_cli() { in_env "$ROOT/.venv/bin/experiment" "$@"; }
+def changed_files() -> set[str]:
+    base = git("merge-base", "HEAD", "main") or git("merge-base", "HEAD", "origin/main") or "HEAD"
+    names = (
+        git("diff", "--name-only", base).splitlines()
+        + git("ls-files", "--others", "--exclude-standard").splitlines()
+    )
+    return {name for name in names if name}
 
-check() { # feature entry expected_exit expected_text command...
-  local feature="$1" entry="$2" expected="$3" text="$4"
-  shift 4
-  local out="$(run_dir)/$feature.out" err="$(run_dir)/$feature.err" code=0
-  "$@" >"$out" 2>"$err" || code=$?
-  local result=pass
-  [ "$code" = "$expected" ] || result=fail
-  grep -q -- "$text" "$out" "$err" || result=fail
-  grep -q Traceback "$err" && result=fail
-  record "$feature" "$entry" "$code" "$result" "${VERIFY_SHOWN:-$*}"
-  echo "$feature: $result (exit $code)"
-  [ "$result" = pass ]
-}
 
-drive() {
-  local x="$STATE/experiments/run_a"
-  case "${1:-}" in
-    seal-workspace)
-      check seal-workspace init-demo 0 "Sealed 160 holdout rows" demo init-demo --experiment "$x" || return 1
-      ls "$(target)"/model-finder/holdouts/*/holdout-*.parquet >/dev/null || { echo "no sealed file" >&2; return 1; }
-      local rows
-      rows="$(in_env "$ROOT/.venv/bin/python" -c "import pandas as p,sys;print(sum(len(p.read_parquet(f'$x/data/{n}.parquet')) for n in ('train','validation')))")"
-      echo "workspace rows: $rows" | tee "$(run_dir)/seal-workspace.rows"
-      [ "$rows" = 640 ]
-      ;;
-    search-metrics)
-      check search-baseline run-candidate 0 "val_auc" demo run-candidate --experiment "$x" --candidate majority-baseline || return 1
-      check search-metrics run-candidate 0 "val_auc" demo run-candidate --experiment "$x" --candidate logreg-tiny || return 1
-      in_env "$ROOT/.venv/bin/python" -c "import json;assert all(set(e['metrics'])=={'train','validation'} for e in json.load(open('$x/results.json')))"
-      ;;
-    final-before-freeze)
-      check final-before-freeze evaluate-final 1 "No frozen selection" demo evaluate-final --experiment "$x"
-      ;;
-    final-after-freeze)
-      check final-freeze freeze-candidate 0 "selected_result" demo freeze-candidate --experiment "$x" --candidate logreg-tiny || return 1
-      check final-after-freeze evaluate-final 0 "holdout_sha256" demo evaluate-final --experiment "$x" || return 1
-      check final-search-blocked run-candidate 1 "holdout-informed" demo run-candidate --experiment "$x" --candidate logreg-tiny
-      ;;
-    complete)
-      printf 'logreg-tiny beats the baseline.\n' >"$x/outputs/report.md"
-      printf 'See README.md.\n' >"$x/outputs/reproduce.md"
-      check record-review record-review 0 "Review recorded" experiment_cli record-review --experiment "$x" --reviewer verify --verdict accepted --report outputs/report.md --limitation "Synthetic data." || return 1
-      check record-completion record-completion 0 "Completion recorded" experiment_cli record-completion --experiment "$x" --outcome supported --conclusion "logreg-tiny beats the baseline." --limitation "Synthetic data." --selected logreg-tiny --baseline majority-baseline --report outputs/report.md --reproduction outputs/reproduce.md || return 1
-      check complete-check complete-check 0 "Result: complete" experiment_cli complete-check "$x" || return 1
-      cp "$x/outputs/final_evaluation.json" "$STATE/final.json"
-      printf ' ' >>"$x/outputs/final_evaluation.json"
-      check complete-check-edited complete-check 1 "Stale evaluation" experiment_cli complete-check "$x" || return 1
-      cp "$STATE/final.json" "$x/outputs/final_evaluation.json"
-      ;;
-    reseal)
-      in_env "$ROOT/.venv/bin/python" -c "
-import numpy as np, pandas as pd
-from demos.demo_bootstrap.generate_data import generate_demo_bootstrap_dataset as g
-g(n_rows=80, seed=901).assign(event_date=pd.date_range('2027-01-01', periods=80)).to_parquet('$STATE/new_rows.parquet', index=False)"
-      check reseal reseal 0 "Sealed 80 new rows" experiment_cli reseal --experiment "$x" --rows "$STATE/new_rows.parquet" --note "Verification run" || return 1
-      [ -f "$x/work/holdout_history/0001/consumed.json" ] || { echo "no history" >&2; return 1; }
-      check reseal-warning validate 0 "holdouts retired" experiment_cli validate "$x"
-      ;;
-    replay)
-      check replay replay 0 "replay.html" experiment_cli replay "$x" || return 1
-      cp "$x/outputs/replay.html" "$(run_dir)/replay.html"
-      grep -q logreg-tiny "$(run_dir)/replay.html"
-      ;;
-    wheel)
-      local consumer="$STATE/consumer" dist="$STATE/dist"
-      mkdir -p "$consumer"
-      (cd "$ROOT" && uv build --wheel --quiet --out-dir "$dist") || return 1
-      uv venv --quiet --python "$ROOT/.venv/bin/python" "$consumer/.venv" || return 1
-      uv pip install --quiet --python "$consumer/.venv/bin/python" "$dist"/*.whl || return 1
-      local installed="$consumer/.venv/bin"
-      check wheel-setup setup 0 "linked skill research" in_env "$installed/experiment" setup --repo "$consumer" || return 1
-      grep -q "name: research" "$consumer/.agents/skills/research/SKILL.md" || { echo "skill link does not resolve" >&2; return 1; }
-      [ -f "$consumer/.claude/skills/experiment-spec/SKILL.md" ] || { echo "no Claude skill link" >&2; return 1; }
-      grep -qF "Read(//**/model-finder/holdouts/**)" "$consumer/.claude/settings.json" || { echo "no deny rule" >&2; return 1; }
-      check wheel-contract contract 0 "What blocks and what labels" in_env "$installed/experiment" contract evidence || return 1
-      local origin
-      origin="$(cd "$consumer" && in_env "$installed/python" -c 'import model_finder, pathlib; p = pathlib.Path(model_finder.__file__).parent; assert (p / "py.typed").is_file(); print(p)')" || return 1
-      case "$origin" in
-        "$consumer"/*) echo "wheel engine: $origin" | tee "$(run_dir)/wheel.origin" ;;
-        *) echo "engine resolves to $origin, not the wheel" >&2; return 1 ;;
-      esac
-      ;;
-    missing-experiment)
-      check missing-experiment run-candidate 1 "does not exist" demo run-candidate --experiment "$STATE/experiments/absent" --candidate logreg-tiny
-      ;;
-    *) echo "unknown feature: ${1:-}" >&2; return 2 ;;
-  esac
-}
+def matches(name: str, glob: str) -> bool:
+    """Match a path glob where `*` stays inside one directory and `**` crosses them."""
+    parts = re.split(r"(\*\*|\*)", glob)
+    pattern = "".join({"**": ".*", "*": "[^/]*"}.get(part, re.escape(part)) for part in parts)
+    return re.fullmatch(pattern, name) is not None
 
-control() {
-  # The mutated assertion expects exit 0. The real exit is 1, so this drive must FAIL.
-  if check control-probe evaluate-final 0 "does not exist" demo evaluate-final --experiment "$STATE/experiments/absent"; then
-    record control:missing-experiment evaluate-final 0 passed-unexpectedly "expected exit 0"
-    echo "control: passed-unexpectedly" >&2
-    return 1
-  fi
-  record control:missing-experiment evaluate-final 1 fail-observed "expected exit 0, actual exit 1"
-  echo "control: fail-observed"
-}
 
-clean() {
-  local dir tripwire=empty
-  dir="$(run_dir)"
-  ls -A "$REAL_STORE" 2>/dev/null | sort >"$STATE/real_store_after" || true
-  diff -q "$STATE/real_store_before" "$STATE/real_store_after" >/dev/null || tripwire="changed: $REAL_STORE"
-  echo "$tripwire" >"$dir/tripwire"
-  rm -rf "$STATE"
-  echo "evidence: $dir (tripwire: $tripwire)"
-}
+def select(files: set[str]) -> list[str]:
+    def hits(globs: tuple[str, ...]) -> bool:
+        return any(matches(f, g) for f in files for g in globs)
 
-case "${1:-}" in
-  launch) launch ;;
-  reset) launch ;;
-  doctor) doctor ;;
-  drive) shift; drive "$@" ;;
-  control) control ;;
-  clean) clean ;;
-  exec) shift; [ "${1:-}" = "--" ] && shift; in_env "$@" ;;
-  *) echo "usage: verify launch|doctor|reset|drive <feature>|control|clean|exec -- <command>" >&2; exit 2 ;;
-esac
+    if hits(SHARED):
+        return list(DRIVES)
+    return [name for name, drive in DRIVES.items() if hits(drive.paths)] or [SMOKE]
+
+
+def preflight() -> None:
+    problems = []
+    if not (BIN / "experiment").is_file():
+        problems.append(f"{BIN}/experiment is missing. Fix: make setup")
+    else:
+        found = subprocess.run(
+            [str(BIN / "python"), "-c", "import model_finder;print(model_finder.__file__)"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if not found.stdout.strip().startswith(str(ROOT)):
+            problems.append(
+                f"model_finder resolves to {found.stdout.strip() or 'nothing'}, not this checkout. Fix: make setup"
+            )
+    if shutil.which("uv") is None:
+        problems.append("uv is not on PATH. Fix: install uv")
+    if problems:
+        sys.exit("verify: preflight failed: " + "; ".join(problems))
+
+
+def real_state() -> list[str]:
+    listing = (
+        sorted(str(p.relative_to(REAL_STORE)) for p in REAL_STORE.rglob("*"))
+        if REAL_STORE.is_dir()
+        else []
+    )
+    return [
+        *listing,
+        f"sources.json mtime {REAL_SOURCES.stat().st_mtime if REAL_SOURCES.exists() else None}",
+    ]
+
+
+def start_ctx(name: str, run_dir: Path, scratch_root: Path) -> Ctx:
+    scratch = Path(tempfile.mkdtemp(prefix=f"{name}-", dir=scratch_root))
+    (scratch / "home/.local/share").mkdir(parents=True)
+    (scratch / "tripwire").mkdir()
+    for tool in TRIPWIRE_TOOLS:
+        stub = scratch / "tripwire" / tool
+        stub.write_text(f'#!/bin/sh\necho "{tool} $*" >> "{scratch}/tripwire.log"\nexit 97\n')
+        stub.chmod(0o755)
+    (run_dir / name).mkdir(parents=True, exist_ok=True)
+    return Ctx(name, scratch, run_dir / name)
+
+
+def run_one(name: str, run_dir: Path, scratch_root: Path) -> dict[str, object]:
+    ctx, started = start_ctx(name, run_dir, scratch_root), time.monotonic()
+    try:
+        result, detail = "PASS", DRIVES[name].run(ctx)
+    except DriveFailure as failure:
+        result, detail = "FAIL", str(failure)
+    if (ctx.scratch / "tripwire.log").exists():
+        result, detail = (
+            "FAIL",
+            f"tripwire called: {(ctx.scratch / 'tripwire.log').read_text().strip()}",
+        )
+    return {
+        "drive": name,
+        "result": result,
+        "seconds": round(time.monotonic() - started, 1),
+        "detail": detail,
+    }
+
+
+def run_control(run_dir: Path, scratch_root: Path) -> dict[str, object]:
+    """Re-drive the missing-experiment check expecting exit 0. The control passes only when that check FAILS."""
+    ctx = start_ctx("control", run_dir, scratch_root)
+    try:
+        check_missing_experiment(ctx, code=0)
+    except DriveFailure as failure:
+        return {
+            "drive": "control",
+            "result": "PASS",
+            "seconds": 0,
+            "detail": f"FAIL observed as expected: {failure}",
+        }
+    return {
+        "drive": "control",
+        "result": "FAIL",
+        "seconds": 0,
+        "detail": "the wrong expectation (exit 0) passed, so the check proves nothing",
+    }
+
+
+def main(argv: list[str]) -> int:
+    command = argv[0] if argv else ""
+    if command == "list":
+        for name, drive in DRIVES.items():
+            print(f"{name:13} {drive.proves}\n{'':13} paths: {', '.join(drive.paths)}")
+        return 0
+    names = {"": select(changed_files()), "all": list(DRIVES), "control": []}.get(command, argv)
+    if unknown := [n for n in names if n not in DRIVES]:
+        print(
+            f"verify: unknown drive {', '.join(unknown)}. Fix: pick from `verify list`",
+            file=sys.stderr,
+        )
+        return 2
+    preflight()
+    sha, dirty = git("rev-parse", "--short=7", "HEAD"), bool(git("status", "--porcelain"))
+    run_dir = (
+        ROOT
+        / ".verify/runs"
+        / f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{sha}{'-dirty' if dirty else ''}"
+    )
+    run_dir.mkdir(parents=True, exist_ok=True)
+    scratch_root = Path(tempfile.mkdtemp(prefix="verify-model-finder-"))
+    atexit.register(shutil.rmtree, scratch_root, ignore_errors=True)
+    before, results = real_state(), []
+    Fixture.ctx = start_ctx("fixture", run_dir, scratch_root)
+    with ThreadPoolExecutor(max_workers=max(len(names), 1)) as pool:
+        futures = [pool.submit(run_one, n, run_dir, scratch_root) for n in names]
+        if command == "control":
+            futures = [pool.submit(run_control, run_dir, scratch_root)]
+        for future in as_completed(futures):
+            results.append(future.result())
+            print("{result} {drive} {seconds}s {detail}".format(**results[-1]), flush=True)
+    if real_state() != before:
+        results.append(
+            {
+                "drive": "tripwire",
+                "result": "FAIL",
+                "seconds": 0,
+                "detail": f"{REAL_STORE} or {REAL_SOURCES} changed",
+            }
+        )
+        print("FAIL tripwire 0s the real holdout store or sources.json changed during the run")
+    (run_dir / "summary.json").write_text(
+        json.dumps({"sha": git("rev-parse", "HEAD"), "dirty": dirty, "drives": results}, indent=1)
+    )
+    print(f"evidence: {run_dir}")
+    return 1 if any(r["result"] != "PASS" for r in results) else 0
+
+
+def stop(signum: int, _frame: object) -> None:
+    for proc in list(LIVE):
+        kill_group(proc)
+    sys.exit(128 + signum)
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, stop)
+    atexit.register(lambda: [kill_group(p) for p in list(LIVE)])
+    sys.exit(main(sys.argv[1:]))

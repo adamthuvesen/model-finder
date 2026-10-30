@@ -30,9 +30,9 @@ uv run experiment next
 uv run experiment contract commands
 ```
 
-Put a test that starts a process or runs a demo in `tests/verify/`. Prove user-facing changes with
-`.agents/skills/verify-model-finder/`. Build test results with `candidate_result()` or `result_fields()` in
-`tests/conftest.py`. Every error message follows
+Put a test that starts a process or runs a demo in `tests/verify/`. Prove changes with `make prove`
+(`verify-model-finder` skill at `.agents/skills/verify-model-finder/`). Build test results with
+`candidate_result()` or `result_fields()` in `tests/conftest.py`. Every error message follows
 `<file>:<line>: <what is wrong>. Fix: <exact change or command>`.
 
 ## Conventions
@@ -78,3 +78,4 @@ Cite each check as `path::name`. `tests/test_agents_table.py` fails unless that 
 | Models reject unknown fields | `rules/pydantic-extra-forbid.yml::pydantic-extra-forbid` | 2026-11-04 | Lint |
 | CLI above domain above I/O, and the engine never imports demos | `pyproject.toml::tool.importlinter.contracts.engine-layers`, `pyproject.toml::tool.importlinter.contracts.engine-independent-of-demos` | 2026-11-04 | Imports only |
 | Engine code passes strict types, and has no dead code | `pyproject.toml::tool.basedpyright.strict`, `Makefile::dead` | 2026-11-04 | Vulture counts every Pydantic field as used |
+| A verify pass needs a control that observes FAIL | `.agents/skills/verify-model-finder/verify::run_control` | 2026-11-06 | One drive's exit-code check |
