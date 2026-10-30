@@ -160,7 +160,7 @@ ignore = ["E501", "TRY003", "PLR2004", "PLR0913", "PLR0917", "ANN401"]
 "demos/**" = ["S", "BLE", "TRY", "PTH", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
 # The command line is the one place that prints.
 "src/model_finder/cli/*.py" = ["T201"]
-"scripts/**" = ["S603", "TID251", "T201"]
+"scripts/**" = ["S603", "S607", "TID251", "T201"]
 ".agents/skills/*/verify" = ["S603", "S607", "TID251", "T201"]
 ".agents/skills/*/drives.py" = ["S603", "S607", "TID251"]
 # Warehouse clients and pyarrow stay optional, so these imports must stay lazy.
@@ -183,11 +183,13 @@ reportUnknownArgumentType = false
 reportUnknownVariableType = false
 reportUnknownParameterType = false
 reportUnknownLambdaType = false
+reportMissingTypeStubs = false
 
 [[tool.basedpyright.executionEnvironments]]
 root = "tests"
 extraPaths = ["."]
 reportMissingParameterType = false
+reportPrivateUsage = false
 
 [tool.deptry]
 extend_exclude = ["experiments", "examples", "scripts"]

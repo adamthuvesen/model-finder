@@ -10,11 +10,11 @@ own temp HOME and data home, offline, on CPU. Run `make setup` first.
 
 ## Run
 
-- `make prove` after a change. It runs the drives that cover files changed against `main`, plus
+- `make verify` after a change. It runs the drives that cover files changed against `main`, plus
   uncommitted and untracked files, or the smoke drive when nothing matches.
-- `make prove ARGS=all` before handing over larger work. Drives run in parallel, about 25s.
-- `make prove ARGS=list` shows the drives. `make prove ARGS="<drive> ..."` runs named drives.
-- `make prove ARGS=control` re-drives one check against a wrong exit code. It exits 0 only when it
+- `make verify ARGS=all` before handing over larger work. Drives run in parallel, about 25s.
+- `make verify ARGS=list` shows the drives. `make verify ARGS="<drive> ..."` runs named drives.
+- `make verify ARGS=control` re-drives one check against a wrong exit code. It exits 0 only when it
   observes FAIL.
 
 The helper is `.agents/skills/verify-model-finder/verify`. The drives live in `drives.py` beside it.
@@ -33,7 +33,7 @@ changed the real holdout store or `~/.config/model-finder/sources.json`.
 
 - No drive pulls from a warehouse or seals a snapshot (`experiment pull`, `experiment seal`).
   `tests/test_sources.py` covers those with DuckDB.
-- The torch and GBDT demos are not driven here. `make verify` runs them in `tests/verify`.
+- The torch and GBDT demos are not driven here. `make slow` runs them in `tests/verify`.
 - The guard is driven only through the Codex hook. The Cursor and Claude Code clients are not run.
 
 ## Gotchas

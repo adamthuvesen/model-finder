@@ -22,7 +22,7 @@ jobs:
 
       - run: make setup
 
-      - run: make fast
+      - run: make check
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -50,11 +50,11 @@ jobs:
         with:
           name: fast-coverage
 
-      - run: make verify
+      - run: make slow
 
-      - run: make prove ARGS=all
+      - run: make verify ARGS=all
 
-      - run: make prove ARGS=control
+      - run: make verify ARGS=control
 
       - name: Install gitleaks
         run: |

@@ -4,7 +4,7 @@ RUN := uv run --locked --extra models --extra deep
 # `databricks` extra installs. Remove these when the connector allows the fixed versions.
 REVIEWED_VULNS := --ignore-vuln CVE-2026-49272 --ignore-vuln PYSEC-2026-4114 --ignore-vuln PYSEC-2026-3925 --ignore-vuln PYSEC-2026-3926 --ignore-vuln PYSEC-2026-3927
 
-.PHONY: setup quick fast verify prove check audit lock lint types boundaries rules deps dead test workflows secrets vulnerabilities
+.PHONY: setup quick check fix slow verify audit lock lint types boundaries rules deps dead test workflows secrets vulnerabilities
 
 # After a clone or a lockfile change. CI runs the same command.
 setup:
@@ -16,21 +16,23 @@ quick:
 
 # The fast lane: every offline check, and every test outside tests/verify. CI runs it first.
 # The targets run in parallel: 12s, against 32s one after another.
-fast:
+check:
 	@$(MAKE) --no-print-directory -j lock lint types boundaries rules deps dead test
 
 # tests/verify holds the slow tests: demos, end-to-end runs, hooks, and generated scripts.
-# The coverage gate adds them to the coverage that `make fast` recorded in .coverage.
-verify:
-	@test -f .coverage || { echo "verify: no .coverage from the fast tests. Fix: run make fast first" >&2; exit 1; }
+# The coverage gate adds them to the coverage that `make check` recorded in .coverage.
+slow:
+	@test -f .coverage || { echo "slow: no .coverage from the fast tests. Fix: run make check first" >&2; exit 1; }
 	$(RUN) pytest --quiet -n auto tests/verify --cov --cov-append --cov-fail-under=89
 
 # Drive the real CLI offline and keep evidence in .verify/runs/. ARGS: all, list, control, or drive names.
-prove:
+verify:
 	@.agents/skills/verify-model-finder/verify $(ARGS)
 
-# The full offline gate, as CI runs it.
-check: fast verify
+# Every auto-fixer: lint fixes, then the formatter.
+fix:
+	$(RUN) ruff check . --fix
+	$(RUN) ruff format .
 
 # Needs the network for the vulnerability database.
 audit: workflows secrets vulnerabilities
@@ -44,6 +46,7 @@ lint:
 
 types:
 	$(RUN) basedpyright --level error
+	$(RUN) python scripts/baseline_ratchet.py
 
 boundaries:
 	$(RUN) lint-imports

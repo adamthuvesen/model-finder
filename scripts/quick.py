@@ -1,4 +1,4 @@
-"""Check only the Python files that changed. `make check` is the full gate."""
+"""Check only the Python files that changed. `make check` is the fast lane."""
 
 from __future__ import annotations
 

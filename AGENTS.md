@@ -23,14 +23,15 @@ run records, and a completion check. Docs: [architecture](.agents/docs/architect
 ```bash
 make setup            # after a clone or a lockfile change
 make quick            # only changed Python files, no tests: under 1s for one file
-make fast             # the fast lane, about 13s; the first CI job
-make verify           # slow tests in tests/verify, then the coverage gate; run make fast first
-make check            # fast, then verify: the full offline gate
+make check            # the fast lane, about 13s; the first CI job
+make fix              # ruff lint fixes, then ruff format
+make slow             # slow tests in tests/verify, then the coverage gate; run make check first
+make verify           # drive the real CLI offline; ARGS=all, list, control, or drive names
 uv run experiment next
 uv run experiment contract commands
 ```
 
-Put a test that starts a process or runs a demo in `tests/verify/`. Prove changes with `make prove`
+Put a test that starts a process or runs a demo in `tests/verify/`. Prove changes with `make verify`
 (`verify-model-finder` skill at `.agents/skills/verify-model-finder/`). Build test results with
 `candidate_result()` or `result_fields()` in `tests/conftest.py`. Every error message follows
 `<file>:<line>: <what is wrong>. Fix: <exact change or command>`.
@@ -77,5 +78,5 @@ Cite each check as `path::name`. `tests/test_agents_table.py` fails unless that 
 | A reported gap and interval match the metrics | `src/model_finder/candidate_result.py::_gap_matches_metrics`, `src/model_finder/candidate_result.py::_interval_declares_bootstrap_count` | 2026-11-04 | Only when reported |
 | Models reject unknown fields | `rules/pydantic-extra-forbid.yml::pydantic-extra-forbid` | 2026-11-04 | Lint |
 | CLI above domain above I/O, and the engine never imports demos | `pyproject.toml::tool.importlinter.contracts.engine-layers`, `pyproject.toml::tool.importlinter.contracts.engine-independent-of-demos` | 2026-11-04 | Imports only |
-| Engine code passes strict types, and has no dead code | `pyproject.toml::tool.basedpyright.strict`, `Makefile::dead` | 2026-11-04 | Vulture counts every Pydantic field as used |
+| Code passes strict types, and the engine has no dead code | `pyproject.toml::tool.basedpyright.typeCheckingMode`, `scripts/baseline_ratchet.py::main`, `Makefile::dead` | 2026-11-04 | Vulture counts every Pydantic field as used. The baseline holds 23 sklearn stub errors and may not grow |
 | A verify pass needs a control that observes FAIL | `.agents/skills/verify-model-finder/verify::run_control` | 2026-11-06 | One drive's exit-code check |
