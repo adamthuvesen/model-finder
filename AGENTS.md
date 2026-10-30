@@ -3,9 +3,7 @@
 `agentic-ml-loop` is a local, offline model-search harness for agent-driven ML
 experiments. The main unit of work is an experiment under `experiments/<experiment_id>/`.
 
-User-level guidance (tone, principles, git etiquette, code conduct) lives in
-`~/.claude/CLAUDE.md` and `~/dotfiles/agents/AGENTS.md` and is *not* duplicated
-here. This file is for project-specific facts.
+This file holds project-specific facts for coding agents.
 
 ## Layout
 
@@ -29,14 +27,12 @@ uv run python -m loop start experiments/<experiment_id>            # also: resum
 uv run --extra models python runners/<experiment_id>_runner.py run-candidate --experiment experiments/<experiment_id> --candidate <id>
 uv run --extra models python runners/demo_bootstrap_runner.py init-demo --force
 
-# CI check:
-uv run ruff check . && uv run ruff format --check . && uv run --extra models --extra deep pytest
+# Full offline gate, the same one CI runs:
+make check
 ```
 
 ## Critical Conventions
 
-- **`CLAUDE.md` is a one-line import of `AGENTS.md`.** `AGENTS.md` is the canonical
-  agent instruction file; keep the import file as `@AGENTS.md`.
 - **`experiment.md` is a spec, not scratch.** Do not mutate
   `experiments/<experiment_id>/experiment.md` unless the human explicitly asks for
   a spec rewrite.

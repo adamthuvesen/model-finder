@@ -8,7 +8,7 @@ It keeps the journal and leaderboard updated as it goes.
 
 Cycles are checked in code ([`loop/cycle_attempt.py`](loop/cycle_attempt.py),
 [`loop/contracts.py`](loop/contracts.py)): the journal must be updated,
-`experiment.md` must stay unchanged, exactly one completion marker must appear,
+`experiment.md` must stay unchanged, the agent must write `cycle_status.json`,
 and results must match the expected schema and metrics. Failed cycles roll back
 and retry.
 

@@ -74,7 +74,21 @@ deep = [
 ]
 
 [dependency-groups]
-dev = ["pre-commit>=4.0.0", "pytest>=8.0", "ruff>=0.11"]
+dev = [
+    "actionlint-py>=1.7.12.25",
+    "ast-grep-cli>=0.51.1",
+    "basedpyright>=1.40.2",
+    "deptry>=0.25.1",
+    "import-linter>=2.15",
+    "pandas-stubs>=3.1.0.261029",
+    "pip-audit>=2.10.1",
+    "pre-commit>=4.0.0",
+    "pytest>=8.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.11",
+    "vulture>=2.16",
+    "zizmor>=1.32.0",
+]
 
 [build-system]
 requires = ["setuptools>=77"]
@@ -100,10 +114,74 @@ target-version = "py313"
 extend-exclude = ["experiments/*/scripts"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM"]
+select = ["E", "F", "I", "B", "UP", "SIM", "S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
 # Line length is enforced by the formatter; don't nag about unsplittable
 # strings, URLs, and f-strings.
-ignore = ["E501"]
+ignore = [
+    "E501",
+    "TRY003",
+    "PLR2004",
+    "PLR0913",
+    "ANN401",
+    # Ratchet: existing findings. Remove each code once its findings are gone.
+    "ANN202",
+    "ARG001",
+    "ARG002",
+    "BLE001",
+    "FBT001",
+    "FBT002",
+    "FBT003",
+    "PERF401",
+    "PLC0415",
+    "PLW0108",
+    "PLW1510",
+    "PLW2901",
+    "PTH105",
+    "PTH123",
+    "RUF001",
+    "RUF022",
+    "RUF043",
+    "RUF046",
+    "RUF100",
+    "S108",
+    "S603",
+    "S607",
+    "SLF001",
+    "T201",
+    "TRY004",
+    "TRY300",
+    "TRY400",
+]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S603", "S607", "ANN", "ARG", "PLC0415", "SLF001", "FBT", "T20", "TRY", "PTH123"]
+"experiments/**" = ["S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
+"runners/**" = ["S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
+"lib/pqa*/**" = ["S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
+"lib/expansion*/**" = ["S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
+"lib/demo_*/**" = ["S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.basedpyright]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
+failOnWarnings = false
+strict = ["lib/*.py", "experiment.py", "viz"]
+exclude = ["**/.venv", "**/__pycache__", "examples", "bench"]
+
+[tool.vulture]
+paths = ["experiment.py", "lib", "viz"]
+min_confidence = 80
+exclude = ["lib/pqa*", "lib/expansion*"]
+
+[tool.deptry]
+extend_exclude = ["experiments", "examples", "evals", "bench", "lib/external_targets"]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["catboost", "duckdb", "joblib", "matplotlib", "optuna", "polars", "scipy", "seaborn", "shap", "statsmodels", "tqdm", "adbc-driver-manager", "adbc-driver-postgresql", "adbc-driver-snowflake", "adbc-driver-bigquery", "databricks-sql-connector", "redshift-connector"]
+[tool.coverage.run]
+source = ["lib", "viz", "experiment"]
+omit = ["lib/pqa*/*", "lib/expansion*/*"]
