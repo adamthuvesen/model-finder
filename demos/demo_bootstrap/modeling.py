@@ -26,7 +26,7 @@ from model_finder.candidates import Scoring, scored_candidate
 from model_finder.splits import SearchSplits
 
 SCORING = Scoring(TARGET_COLUMN, "val_auc", classification_metrics)
-_LOGREG_PARAMS = {"max_iter": 500, "random_state": RANDOM_STATE, "solver": "lbfgs"}
+_LOGREG_PARAMS: dict[str, Any] = {"max_iter": 500, "random_state": RANDOM_STATE, "solver": "lbfgs"}
 
 
 def run_majority_baseline(splits: SearchSplits) -> FittedCandidate:

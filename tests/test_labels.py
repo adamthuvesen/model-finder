@@ -13,14 +13,14 @@ from model_finder.cli.main import main
 from model_finder.cli.runner import RunnerConfig, run_runner_main
 from model_finder.runner import ExperimentSeed
 from tests.conftest import SPEC, candidate_result, fitted, rows
-from tests.test_usable_defaults import _quick
+from tests.test_usable_defaults import quick_runner
 
 
 @pytest.fixture
 def config(code_root: Path) -> RunnerConfig:
     return RunnerConfig(
         seed=ExperimentSeed("experiment"),
-        candidate_runners={"quick": _quick("quick", 0.5), "full": fitted},
+        candidate_runners={"quick": quick_runner("quick", 0.5), "full": fitted},
         rows_loader=lambda seed: rows(seed=seed),
         time_column="when",
         target_column="label",
@@ -137,7 +137,7 @@ def test_a_nondeterministic_pull_needs_a_reason_and_is_labelled(
 
     config = RunnerConfig(
         seed=ExperimentSeed("experiment"),
-        candidate_runners={"quick": _quick("quick", 0.5)},
+        candidate_runners={"quick": quick_runner("quick", 0.5)},
         rows_loader=lambda seed: pd.DataFrame(),
         time_column="when_at",
         target_column="label",

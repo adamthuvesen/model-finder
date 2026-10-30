@@ -60,8 +60,8 @@ def _write_outputs(experiment: Path) -> None:
 
 
 def _record(experiment: Path, **overrides: object) -> CompletionRecord:
-    return CompletionRecord(
-        **{
+    return CompletionRecord.model_validate(
+        {
             "outcome": "inconclusive",
             "conclusion": "Available evidence cannot answer the question.",
             "limitations": ["No data was available."],

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from model_finder.viz.bundle import bundle
 from model_finder.viz.generate import (
+    JsonObject,
     candidate_summaries,
     parse_experiment_md,
     replay_scenes,
@@ -33,7 +34,9 @@ class TestParseExperimentMd:
         assert parsed["metric"] == "val_auc"
 
 
-def _summary(candidate_id: str, objective_metric: str, score: float, **validation: float) -> dict:
+def _summary(
+    candidate_id: str, objective_metric: str, score: float, **validation: float
+) -> JsonObject:
     return candidate_summaries(
         [recorded_result(candidate_id, objective_metric, score, validation)]
     )[0]

@@ -20,7 +20,7 @@ from model_finder.splits import SearchSplits
 from tests.conftest import SPEC, candidate_result, rows
 
 
-def _quick(candidate_id: str, score: float) -> CandidateRunner:
+def quick_runner(candidate_id: str, score: float) -> CandidateRunner:
     def runner(_splits: SearchSplits) -> FittedCandidate:
         return FittedCandidate(
             result=candidate_result(
@@ -36,7 +36,10 @@ def _quick(candidate_id: str, score: float) -> CandidateRunner:
 def config(code_root: Path) -> RunnerConfig:
     return RunnerConfig(
         seed=ExperimentSeed("experiment"),
-        candidate_runners={"quick": _quick("quick", 0.6), "other": _quick("other", 0.7)},
+        candidate_runners={
+            "quick": quick_runner("quick", 0.6),
+            "other": quick_runner("other", 0.7),
+        },
         rows_loader=lambda seed: rows(seed=seed),
         rows_source=None,
         time_column="when",
@@ -183,7 +186,7 @@ def test_a_changed_rerun_still_blocks_before_the_read(
     _start(config, experiment)
     assert _step(config, "run-candidate", experiment, "--candidate", "quick") == 0
     assert _step(config, "freeze-candidate", experiment, "--candidate", "quick") == 0
-    changed = replace(config, candidate_runners={"quick": _quick("quick", 0.9)})
+    changed = replace(config, candidate_runners={"quick": quick_runner("quick", 0.9)})
     assert _step(changed, "evaluate-final", experiment) == 1
     assert "changed frozen selection field" in capsys.readouterr().err
     assert read_ledger() == []

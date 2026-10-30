@@ -34,7 +34,7 @@ from model_finder.ledger import entries_for, read_ledger, store_root
 from model_finder.paths import ATTEMPT_PATH, FINAL_PATH
 from model_finder.reseal import reseal_holdout
 from model_finder.run_evidence import (
-    _dependencies_sha256,
+    _dependencies_sha256,  # pyright: ignore[reportPrivateUsage]
     code_fingerprint,
     recorded_fingerprint_is_current,
 )

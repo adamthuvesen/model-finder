@@ -37,7 +37,7 @@ from model_finder.sources import (
 from model_finder.sources.adapters import (
     DatabricksExtractor,
     RedshiftExtractor,
-    _to_adbc_db_kwargs,
+    _to_adbc_db_kwargs,  # pyright: ignore[reportPrivateUsage]
 )
 from model_finder.sources.errors import SourceError
 from model_finder.sources.query import require_read_only_query
@@ -540,7 +540,7 @@ def test_importing_sources_does_not_import_warehouse_clients(monkeypatch) -> Non
     for name in list(sys.modules):
         if name.startswith("model_finder.sources"):
             monkeypatch.delitem(sys.modules, name, raising=False)
-    import model_finder.sources  # noqa: F401
+    importlib.import_module("model_finder.sources")
 
     for client in (
         "adbc_driver_manager",
