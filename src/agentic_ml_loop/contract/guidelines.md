@@ -3,6 +3,9 @@
 Rules that code cannot check. The `## Enforced rules` table in this repository's `AGENTS.md` lists the rules that code enforces.
 Method lives in [program.md](program.md).
 
+These are sensible defaults for good models, not a publication standard. Skip one when it does not earn its
+cost, and say so in the journal. Selecting on the holdout is a labelled choice: `--allow-reread --reason <text>`.
+
 ## Evidence
 
 1. Write the objective, success criterion, expected direction, and falsifier in the journal before running code.
@@ -20,7 +23,7 @@ Method lives in [program.md](program.md).
 
 ## Uncertainty
 
-10. Before you claim a winner, report uncertainty: paired bootstrap with at least 1000 resamples, repeated CV, or a permutation test. On a validation set under 5K rows, a 0.01 AUC difference is noise.
+10. Before you rely on a close winner, report uncertainty: paired bootstrap, repeated CV, or a permutation test. On a validation set under 5K rows, a 0.01 AUC difference is noise.
 11. After every 5 candidates on one validation split, report the best candidate's 95% CI. If it overlaps the runner-up, the ranking is not trustworthy. After 20 candidates, treat the leaderboard with increasing skepticism.
 12. `experiment validate` warns when a gap exceeds 0.05 AUC or 10% relative. Investigate before you accept that candidate.
 13. Declare the tuning budget in the journal before the search (for example `n_trials=50`). Tune on train-only data. Persist the study under `work/`.
@@ -36,4 +39,4 @@ Method lives in [program.md](program.md).
 
 18. Change one variable per candidate. Keep the preprocessing identical within a comparison group.
 19. Tune decision thresholds on validation, after model selection, and keep them out of `objective_score`.
-20. Seed every stochastic component. Record the command and the output paths in the journal.
+20. Seed stochastic components when you can. Record the command and the output paths in the journal.

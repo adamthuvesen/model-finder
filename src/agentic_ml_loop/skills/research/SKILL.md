@@ -6,8 +6,7 @@ description: Run or resume an agentic-ml-loop experiment under a native goal. Us
 # Research
 
 Answer the experiment's question with reproducible evidence under the authorized budget.
-Done means the answer, deliverables, limitations, and an independent method review support the
-completion claim. A budget stop leaves a checkpoint and names unresolved work.
+Done means the answer and its label are on record: `complete` or `complete, exploratory`. A budget stop leaves a checkpoint and names unresolved work.
 
 ## Orient or recover
 
@@ -43,20 +42,20 @@ invalid resamples. Report the difference against the practical threshold.
 An interval for the selected candidate alone does not correct adaptive validation reuse.
 
 Select on validation. Then run `freeze-candidate --experiment <path> --candidate <id>` and
-`evaluate-final --experiment <path>`. A frozen comparison rejects further candidate writes.
-Do not tune after reading the holdout. If a decision must change, use `experiment reseal` with
-unseen rows, as `uv run experiment contract evidence` describes. Old estimates stay exploratory.
+`evaluate-final --experiment <path>`. A new run before the read withdraws the selection.
+Prefer not to tune after reading the holdout. If a decision must change, use `experiment reseal` with
+unseen rows, or pass `--allow-reread --reason <text>` and accept the exploratory label.
+`uv run experiment contract evidence` describes both.
 
 Ask a reviewer with fresh context to trace the question, implementation, split provenance,
 comparison, and conclusion. Review is internal work, not a user approval gate.
-If review is unavailable, disclose that and do not claim reviewed completion.
+If review is unavailable, disclose that. `complete-check` warns.
 
 ## Checkpoint or finish
 
-Write `outputs/<report>.md` with the decision, baseline comparison, uncertainty, scope, limitations,
-and reproduction commands. Have the fresh reviewer run `uv run experiment record-review`.
-Then run `uv run experiment record-completion`. `uv run experiment contract evidence` shows both commands.
-Run `uv run experiment complete-check experiments/<id>` before you claim reviewed completion.
+Write `outputs/<report>.md` with the decision, baseline comparison, uncertainty, scope, and limitations.
+Have the fresh reviewer run `uv run experiment record-review`. Then run `uv run experiment record-completion`.
+Run `uv run experiment complete-check experiments/<id>`, and report its label with your answer.
 It checks references and freshness, not scientific validity.
 
 Update `status.md` at each checkpoint: current question, last verified result and paths, next action,

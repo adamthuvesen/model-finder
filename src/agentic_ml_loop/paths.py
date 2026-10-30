@@ -29,6 +29,8 @@ FINAL_PATH = "outputs/final_evaluation.json"
 COMPLETION_PATH = "outputs/completion.json"
 REVIEW_PATH = "outputs/review.json"
 HOLDOUT_HISTORY_DIR = "work/holdout_history"
+REREADS_DIR = "work/rereads"
+REBUILDS_PATH = "work/results_rebuilds.json"
 SNAPSHOT_FILE_NAME = "snapshot.parquet"
 
 

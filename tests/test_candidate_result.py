@@ -18,12 +18,16 @@ def test_split_keys_are_an_allowlist(split: str) -> None:
         CandidateResult.model_validate(_payload(metrics=metrics))
 
 
-@pytest.mark.parametrize("field", ["random_seed", "bootstrap_count", "train_validation_gap"])
-def test_declared_fields_are_required(field: str) -> None:
-    payload = _payload()
-    del payload[field]
-    with pytest.raises(ValidationError, match=field):
-        CandidateResult.model_validate(payload)
+def test_a_quick_candidate_needs_only_its_score() -> None:
+    result = CandidateResult(
+        candidate_id="quick",
+        objective_metric="val_auc",
+        objective_score=0.7,
+        metrics=SearchMetrics(validation={"auc": 0.7}),
+    )
+    assert result.random_seed is None
+    assert result.bootstrap_count is None
+    assert result.train_validation_gap is None
 
 
 def test_gap_must_match_the_metrics() -> None:
@@ -36,13 +40,11 @@ def test_gap_points_toward_overfit_for_a_minimized_metric() -> None:
     assert train_validation_gap(metrics, "val_rmse", "minimize") == 2.0
 
 
-def test_interval_requires_a_bootstrap_count_of_at_least_1000() -> None:
+def test_interval_requires_a_bootstrap_count() -> None:
     interval = {"val_auc_ci_95": [0.6, 0.8]}
-    with pytest.raises(ValidationError, match="require each other"):
+    with pytest.raises(ValidationError, match="requires bootstrap_count"):
         CandidateResult.model_validate(_payload(hyperparameters=interval))
-    with pytest.raises(ValidationError, match="1000"):
-        CandidateResult.model_validate(_payload(hyperparameters=interval, bootstrap_count=999))
-    CandidateResult.model_validate(_payload(hyperparameters=interval, bootstrap_count=1000))
+    CandidateResult.model_validate(_payload(hyperparameters=interval, bootstrap_count=200))
 
 
 def test_objective_must_be_the_validation_metric() -> None:
@@ -87,13 +89,8 @@ def test_objective_cannot_name_a_holdout() -> None:
         candidate_result(objective_metric="val_holdout_auc")
 
 
-@pytest.mark.parametrize(
-    "hyperparameters",
-    [{"final_holdout_auc": 0.9}, {"nested": {"test_auc": 0.9}}, {"a": [{"holdout": 1}]}],
-)
-def test_hyperparameters_cannot_smuggle_holdout_scores(hyperparameters) -> None:
-    with pytest.raises(ValidationError, match=r"holdout|test"):
-        CandidateResult.model_validate(_payload(hyperparameters=hyperparameters))
+def test_a_hyperparameter_may_use_any_name() -> None:
+    assert CandidateResult.model_validate(_payload(hyperparameters={"final_lr": 0.1}))
 
 
 def test_test_size_is_a_legitimate_hyperparameter() -> None:

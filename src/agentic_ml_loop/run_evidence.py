@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from agentic_ml_loop.candidate_result import Direction
 from agentic_ml_loop.io import file_sha256, read_text
-from agentic_ml_loop.paths import SPECIFICATION_FILE_NAME
+from agentic_ml_loop.paths import SPECIFICATION_FILE_NAME, WORK_DIRNAME
 from agentic_ml_loop.results import ComparisonContext, RecordedResult
 from agentic_ml_loop.splits import SearchDataIdentity, Sha256
 
@@ -155,6 +155,23 @@ def write_run_evidence(experiment_dir: Path, evidence: RunEvidence) -> None:
             Path(temporary).unlink(missing_ok=True)
 
 
+def latest_recorded_results(experiment_dir: Path) -> list[RecordedResult]:
+    """Return each candidate's latest run, oldest first. Any invalid record refuses the whole read."""
+    latest: dict[str, RunEvidence] = {}
+    for path in sorted((experiment_dir / WORK_DIRNAME / "runs").glob("*.json")):
+        try:
+            evidence = RunEvidence.model_validate_json(read_text(path))
+        except ValidationError as exc:
+            raise ValueError(f"Run record {path} is invalid. Nothing was rebuilt.") from exc
+        result = evidence.result
+        if experiment_dir / result.run_evidence != path:
+            raise ValueError(f"Run record {path} names another run. Nothing was rebuilt.")
+        current = latest.get(result.candidate_id)
+        if current is None or evidence.finished_at > current.finished_at:
+            latest[result.candidate_id] = evidence
+    return [run.result for run in sorted(latest.values(), key=lambda run: run.finished_at)]
+
+
 def recorded_fingerprint_is_current(experiment_dir: Path, recorded: CodeFingerprint) -> bool:
     code_root = (experiment_dir / recorded.code_root).resolve()
     configs = [(experiment_dir / name).resolve() for name in recorded.config_files]
@@ -168,18 +185,24 @@ def recorded_fingerprint_is_current(experiment_dir: Path, recorded: CodeFingerpr
 
 
 def validate_run_evidence(experiment_dir: Path, entry: RecordedResult) -> list[str]:
-    """Verify the archived result, the current specification, and the runtime identity."""
+    """Verify the archived result. A mismatch here means the record is not what ran."""
     path = experiment_dir / entry.run_evidence
     try:
         evidence = RunEvidence.model_validate_json(read_text(path))
     except (OSError, ValidationError) as exc:
         return [f"cannot read run evidence for {entry.candidate_id}: {exc}"]
-    errors: list[str] = []
     if evidence.result != entry:
-        errors.append(f"run evidence does not match result: {entry.candidate_id}")
+        return [f"run evidence does not match result: {entry.candidate_id}"]
+    return []
+
+
+def run_evidence_staleness(experiment_dir: Path, entry: RecordedResult) -> list[str]:
+    """Report what changed since a run. These warn, unless a person asks for a strict check."""
+    stale: list[str] = []
     spec = experiment_dir / SPECIFICATION_FILE_NAME
     if not spec.is_file() or entry.comparison_context.spec_sha256 != file_sha256(spec):
-        errors.append(f"run evidence specification hash is stale: {entry.candidate_id}")
+        stale.append(f"The specification changed since {entry.candidate_id} ran.")
+    evidence = RunEvidence.model_validate_json(read_text(experiment_dir / entry.run_evidence))
     if not recorded_fingerprint_is_current(experiment_dir, evidence.code_fingerprint):
-        errors.append(f"run evidence code fingerprint is stale: {entry.candidate_id}")
-    return errors
+        stale.append(f"Code or dependencies changed since {entry.candidate_id} ran.")
+    return stale

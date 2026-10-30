@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 from pydantic import ValidationError
 
-from agentic_ml_loop.candidate_result import canonical_objective_metric, metric_key
-from agentic_ml_loop.holdout import consumed_holdout_count
+from agentic_ml_loop.candidate_result import (
+    CandidateResult,
+    canonical_objective_metric,
+    holdout_scored_names,
+    metric_key,
+    train_validation_gap,
+)
+from agentic_ml_loop.holdout import TRAIN_FILE_NAME, consumed_holdout_count
 from agentic_ml_loop.paths import (
     DATA_DIRNAME,
     HOLDOUT_SEAL_FILE_NAME,
@@ -56,6 +63,11 @@ _AUC_GAP_LIMIT = 0.05
 _RELATIVE_GAP_LIMIT = 0.10
 
 
+NO_HOLDOUT_WARNING = (
+    "warning: No holdout is sealed. Scores come from validation rows and stay exploratory."
+)
+
+
 def stray_root_entries(experiment_dir: Path) -> list[str]:
     """Return non-hidden root entries outside the allowlist."""
     return sorted(
@@ -85,7 +97,11 @@ def _gap_warnings(results: list[RecordedResult]) -> list[str]:
     warnings: list[str] = []
     for result in results:
         key = metric_key(result.objective_metric)
-        gap = result.train_validation_gap
+        gap = train_validation_gap(
+            result.metrics, result.objective_metric, result.objective_direction
+        )
+        if gap is None:
+            continue
         limit = (
             _AUC_GAP_LIMIT if "auc" in key else _RELATIVE_GAP_LIMIT * abs(result.metrics.train[key])
         )
@@ -95,6 +111,15 @@ def _gap_warnings(results: list[RecordedResult]) -> list[str]:
                 "Investigate before accepting it."
             )
     return warnings
+
+
+def hyperparameter_warnings(results: Sequence[CandidateResult]) -> list[str]:
+    return [
+        f"warning: {result.candidate_id} has a hyperparameter named {name}. If it holds a holdout "
+        "score, it is not a search result. Use `evaluate-final` instead."
+        for result in results
+        for name in holdout_scored_names(dict(result.hyperparameters))
+    ]
 
 
 def _objective_errors(experiment_dir: Path, results: list[RecordedResult]) -> list[str]:
@@ -117,6 +142,16 @@ def _objective_errors(experiment_dir: Path, results: list[RecordedResult]) -> li
     return errors
 
 
+def _next_step(experiment_dir: Path) -> str:
+    seed = "run your runner's `init-demo --experiment <dir>` to seed these files"
+    if (experiment_dir / DATA_DIRNAME / SNAPSHOT_FILENAME).exists():
+        return (
+            f"Next: run `experiment seal --experiment {experiment_dir} --time-column <column>`, "
+            f"then {seed}."
+        )
+    return f"Next: {seed}."
+
+
 def validate_experiment(experiment_dir: Path, *, strict_completion: bool = False) -> list[str]:
     """Return errors and ``warning:`` messages. An empty list means the directory is valid."""
     if not experiment_dir.is_dir():
@@ -127,7 +162,7 @@ def validate_experiment(experiment_dir: Path, *, strict_completion: bool = False
         if not (experiment_dir / name).exists()
     ]
     if missing:
-        return missing
+        return [*missing, _next_step(experiment_dir)]
     messages: list[str] = []
     stray = stray_root_entries(experiment_dir)
     if stray:
@@ -144,6 +179,7 @@ def validate_experiment(experiment_dir: Path, *, strict_completion: bool = False
                 f"{RESULTS_FILE_NAME}{json.dumps(list(error['loc']))}: {error['msg']}"
                 for error in exc.errors()
             ),
+            "Do not edit the leaderboard. Run `experiment rebuild-results`.",
         ]
     retired = consumed_holdout_count(experiment_dir)
     if retired and not (experiment_dir / HOLDOUT_SEAL_FILE_NAME).exists():
@@ -155,10 +191,14 @@ def validate_experiment(experiment_dir: Path, *, strict_completion: bool = False
             f"warning: {retired} holdouts retired. Their final metrics are exploratory, "
             "and selection after reading them is holdout-informed."
         )
+    has_search_rows = (experiment_dir / DATA_DIRNAME / TRAIN_FILE_NAME).is_file()
+    if has_search_rows and not (experiment_dir / HOLDOUT_SEAL_FILE_NAME).exists():
+        messages.append(NO_HOLDOUT_WARNING)
     if strict_completion and not results:
         messages.append("strict completion requires at least one result entry")
     messages.extend(comparison_errors(results))
     messages.extend(_gap_warnings(results))
+    messages.extend(hyperparameter_warnings(results))
     try:
         messages.extend(_objective_errors(experiment_dir, results))
     except ValueError as exc:

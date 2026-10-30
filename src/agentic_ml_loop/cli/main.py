@@ -3,29 +3,33 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
 import pandas as pd
 
-from agentic_ml_loop.cli.errors import run_reporting_errors, warn_rows_stay_readable
+from agentic_ml_loop.cli.errors import (
+    override_reason,
+    run_reporting_errors,
+    warn_if_already_read,
+    warn_rows_stay_readable,
+)
 from agentic_ml_loop.cli.setup import setup_repo
 from agentic_ml_loop.completion import (
-    check_completion,
+    assess_completion,
     record_from_evidence,
     save_completion,
     write_review,
 )
 from agentic_ml_loop.feature_provenance import validate_feature_provenance
-from agentic_ml_loop.final_evaluation import reseal_holdout
+from agentic_ml_loop.final_evaluation import leaderboard_label, rebuild_results, reseal_holdout
 from agentic_ml_loop.holdout import load_search_splits
 from agentic_ml_loop.paths import (
     DATA_DIRNAME,
-    FINAL_PATH,
     HOLDOUT_SEAL_FILE_NAME,
     OUTPUTS_DIRNAME,
 )
+from agentic_ml_loop.results import load_results, ranked_results
 from agentic_ml_loop.sources.adapters import SUPPORTED_SOURCE_TYPES
 from agentic_ml_loop.sources.query import (
     apply_as_of,
@@ -39,6 +43,7 @@ from agentic_ml_loop.sources.snapshot import (
     SnapshotFreezeRequest,
     freeze_snapshot,
     seal_snapshot,
+    split_snapshot_without_holdout,
 )
 from agentic_ml_loop.validation import validate_experiment
 from agentic_ml_loop.viz.bundle import write_replay
@@ -68,14 +73,31 @@ def _validate(args: argparse.Namespace) -> int:
 
 
 def _complete_check(args: argparse.Namespace) -> int:
-    errors = check_completion(Path(args.experiment))
-    if errors:
-        print("Research evidence check failed:", file=sys.stderr)
-        for error in errors:
-            print(f"  - {error}", file=sys.stderr)
-        return 1
-    print(f"Research evidence check passed: {args.experiment}")
-    print("Traceability verified. Scientific validity still requires independent review.")
+    status = assess_completion(Path(args.experiment), strict=args.strict)
+    print(f"Result: {status.label}")
+    for heading, lines in (
+        ("Not complete because:", status.errors),
+        ("Exploratory because:", status.exploratory),
+        ("Warnings:", status.warnings),
+    ):
+        if lines:
+            print(heading)
+            print("\n".join(f"  - {line}" for line in lines))
+    return 1 if status.errors else 0
+
+
+def _leaderboard(args: argparse.Namespace) -> int:
+    experiment_dir = Path(args.experiment)
+    results = ranked_results(load_results(experiment_dir))
+    if not results:
+        print("No results yet. Run a candidate with `run-candidate`.")
+        return 0
+    for rank, result in enumerate(results, start=1):
+        print(f"{rank:>3}  {result.objective_score:>10.4f}  {result.candidate_id}")
+    print(f"Metric: {results[0].objective_metric}, on validation rows.")
+    label = leaderboard_label(experiment_dir)
+    if label:
+        print(label)
     return 0
 
 
@@ -85,7 +107,6 @@ def _record_review(args: argparse.Namespace) -> int:
         args.reviewer,
         args.verdict,
         args.report,
-        args.evaluation,
         args.finding,
         args.limitation,
     )
@@ -98,7 +119,6 @@ def _record_completion(args: argparse.Namespace) -> int:
     record = record_from_evidence(
         experiment_dir,
         args.report,
-        args.evaluation,
         args.reproduction,
         outcome=args.outcome,
         conclusion=args.conclusion,
@@ -106,10 +126,16 @@ def _record_completion(args: argparse.Namespace) -> int:
         selected_candidate_id=args.selected,
         baseline_candidate_id=args.baseline,
         comparison_candidate_id=args.comparison,
-        acknowledged_prior_holdouts=args.acknowledged_prior_holdouts,
         acknowledged_overlap=args.acknowledged_overlap,
     )
     print(f"Completion recorded: {save_completion(experiment_dir, record)}")
+    print(f"Result: {assess_completion(experiment_dir).label}")
+    return 0
+
+
+def _rebuild_results(args: argparse.Namespace) -> int:
+    reason = override_reason("--allow-changes", allowed=args.allow_changes, reason=args.reason)
+    print(rebuild_results(Path(args.experiment), change_reason=reason))
     return 0
 
 
@@ -142,6 +168,10 @@ def _check_features(args: argparse.Namespace) -> int:
 
 
 def _seal(args: argparse.Namespace) -> int:
+    if args.no_holdout:
+        split_snapshot_without_holdout(Path(args.experiment), args.time_column)
+        print("Wrote search rows with no holdout. Results stay labelled exploratory.")
+        return 0
     seal = seal_snapshot(
         Path(args.experiment),
         args.time_column,
@@ -152,26 +182,12 @@ def _seal(args: argparse.Namespace) -> int:
     return 0
 
 
-def _is_inside(path: Path, directory: Path) -> bool:
-    """Compare by file identity, through symlinks and case-insensitive file systems."""
-    for candidate in (Path(os.path.normpath(path.absolute())), path.resolve()):
-        for parent in candidate.parents:
-            if parent.exists() and parent.samefile(directory):
-                return True
-    return False
-
-
 def _reseal(args: argparse.Namespace) -> int:
-    experiment_dir = Path(args.experiment).resolve()
     rows_path = Path(args.rows)
-    if _is_inside(rows_path, experiment_dir):
-        raise ValueError(
-            "New holdout rows must come from outside the experiment. "
-            "Rows inside it are visible to search."
-        )
-    seal = reseal_holdout(experiment_dir, pd.read_parquet(rows_path), args.note)
-    print(f"Retired the old holdout. Sealed {seal.holdout_rows} new rows: {seal.holdout_sha256}")
+    seal = reseal_holdout(Path(args.experiment).resolve(), pd.read_parquet(rows_path), args.note)
+    print(f"Sealed {seal.holdout_rows} new rows: {seal.holdout_sha256}")
     warn_rows_stay_readable(rows_path)
+    warn_if_already_read(seal.holdout_sha256)
     return 0
 
 
@@ -212,6 +228,9 @@ def _pull(args: argparse.Namespace) -> int:
         )
     query = _read_query(args.query)
     rows_dir = experiment_dir / DATA_DIRNAME
+    nondeterministic_reason = override_reason(
+        "--allow-nondeterministic", allowed=args.allow_nondeterministic, reason=args.reason
+    )
     if args.dry_run:
         require_read_only_query(query, args.source)
         require_deterministic_query(
@@ -230,7 +249,7 @@ def _pull(args: argparse.Namespace) -> int:
             config=_pull_config(args),
             as_of=args.as_of,
             sample_seed=args.sample_seed,
-            allow_nondeterministic=args.allow_nondeterministic,
+            nondeterministic_reason=nondeterministic_reason,
         )
     )
     print(
@@ -274,6 +293,7 @@ def _add_pull_arguments(pull: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Override the reproducibility guard (unseeded LIMIT/sampling)",
     )
+    pull.add_argument("--reason", default=None, help="Why. Required with --allow-nondeterministic")
     pull.set_defaults(func=_pull)
 
 
@@ -281,10 +301,9 @@ def _add_review_arguments(review: argparse.ArgumentParser) -> None:
     review.add_argument("--experiment", required=True)
     review.add_argument("--reviewer", required=True)
     review.add_argument("--verdict", required=True, choices=["accepted", "changes_requested"])
-    review.add_argument("--report", required=True, help="Path inside the experiment")
-    review.add_argument("--evaluation", default=FINAL_PATH, help="Path inside the experiment")
+    review.add_argument("--report", default=None, help="Path inside the experiment")
     review.add_argument("--finding", action="append", default=[], help="Repeat for each finding")
-    review.add_argument("--limitation", action="append", required=True, help="Repeat for each")
+    review.add_argument("--limitation", action="append", default=[], help="Repeat for each")
     review.set_defaults(func=_record_review)
 
 
@@ -296,16 +315,32 @@ def _add_completion_arguments(completion: argparse.ArgumentParser) -> None:
         choices=["supported", "no_demonstrated_improvement", "inconclusive"],
     )
     completion.add_argument("--conclusion", required=True)
-    completion.add_argument("--limitation", action="append", required=True, help="Repeat for each")
-    completion.add_argument("--report", required=True, help="Path inside the experiment")
-    completion.add_argument("--reproduction", required=True, help="Path inside the experiment")
-    completion.add_argument("--evaluation", default=FINAL_PATH, help="Path inside the experiment")
+    completion.add_argument("--limitation", action="append", default=[], help="Repeat for each")
+    completion.add_argument("--report", default=None, help="Path inside the experiment")
+    completion.add_argument("--reproduction", default=None, help="Path inside the experiment")
     completion.add_argument("--selected", default=None, help="Candidate ID")
     completion.add_argument("--baseline", default=None, help="Candidate ID")
     completion.add_argument("--comparison", default=None, help="Candidate ID when baseline stays")
-    completion.add_argument("--acknowledged-prior-holdouts", type=int, default=0)
     completion.add_argument("--acknowledged-overlap", default=None)
     completion.set_defaults(func=_record_completion)
+
+
+def _add_seal_arguments(seal: argparse.ArgumentParser) -> None:
+    seal.add_argument("--experiment", required=True)
+    seal.add_argument("--time-column", required=True)
+    seal.add_argument("--no-holdout", action="store_true", help="Keep all rows for search")
+    seal.add_argument("--train-fraction", type=float, default=0.6)
+    seal.add_argument("--validation-fraction", type=float, default=0.2)
+    seal.set_defaults(func=_seal)
+
+
+def _add_reseal_arguments(reseal: argparse.ArgumentParser) -> None:
+    reseal.add_argument("--experiment", required=True)
+    reseal.add_argument("--rows", required=True, help="Parquet file of new rows")
+    reseal.add_argument(
+        "--note", required=True, help="A short note: why, and where the rows came from"
+    )
+    reseal.set_defaults(func=_reseal)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -321,7 +356,26 @@ def _parser() -> argparse.ArgumentParser:
 
     complete = subparsers.add_parser("complete-check", help="Check research completion evidence")
     complete.add_argument("experiment")
+    complete.add_argument(
+        "--strict", action="store_true", help="Fail on every exploratory label and warning"
+    )
     complete.set_defaults(func=_complete_check)
+
+    leaderboard = subparsers.add_parser("leaderboard", help="Print candidates, best first")
+    leaderboard.add_argument("experiment")
+    leaderboard.set_defaults(func=_leaderboard)
+
+    rebuild = subparsers.add_parser(
+        "rebuild-results", help="Rebuild the leaderboard from run records and say what changed"
+    )
+    rebuild.add_argument("experiment")
+    rebuild.add_argument(
+        "--allow-changes",
+        action="store_true",
+        help="Accept results that differ from the leaderboard. Recorded, and labelled exploratory",
+    )
+    rebuild.add_argument("--reason", default=None, help="Why. Required with --allow-changes")
+    rebuild.set_defaults(func=_rebuild_results)
 
     _add_review_arguments(
         subparsers.add_parser(
@@ -352,20 +406,12 @@ def _parser() -> argparse.ArgumentParser:
     features.add_argument("--time-column", required=True)
     features.set_defaults(func=_check_features)
 
-    seal = subparsers.add_parser("seal", help="Seal the latest snapshot rows as the holdout")
-    seal.add_argument("--experiment", required=True)
-    seal.add_argument("--time-column", required=True)
-    seal.add_argument("--train-fraction", type=float, default=0.6)
-    seal.add_argument("--validation-fraction", type=float, default=0.2)
-    seal.set_defaults(func=_seal)
-
-    reseal = subparsers.add_parser("reseal", help="Retire a read holdout and seal new rows")
-    reseal.add_argument("--experiment", required=True)
-    reseal.add_argument("--rows", required=True, help="Parquet file of new, unseen rows")
-    reseal.add_argument(
-        "--note", required=True, help="Why the holdout is retired and where the rows came from"
+    _add_seal_arguments(
+        subparsers.add_parser("seal", help="Seal the latest snapshot rows as the holdout")
     )
-    reseal.set_defaults(func=_reseal)
+    _add_reseal_arguments(
+        subparsers.add_parser("reseal", help="Seal new rows, retiring any current holdout")
+    )
 
     replay = subparsers.add_parser("replay", help="Render results and the journal to HTML")
     replay.add_argument("experiment")

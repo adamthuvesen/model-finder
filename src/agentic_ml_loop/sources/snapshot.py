@@ -21,6 +21,7 @@ from agentic_ml_loop.holdout import (
     read_holdout_seal,
     seal_holdout,
     verify_sealed_holdout,
+    write_search_rows,
 )
 from agentic_ml_loop.io import file_sha256
 from agentic_ml_loop.paths import DATA_DIRNAME, HOLDOUT_SEAL_FILE_NAME
@@ -38,7 +39,7 @@ from agentic_ml_loop.sources.query import (
     require_deterministic_query,
     require_read_only_query,
 )
-from agentic_ml_loop.splits import temporal_split
+from agentic_ml_loop.splits import temporal_search_split, temporal_split
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -53,7 +54,7 @@ class SnapshotFreezeRequest:
     config: dict[str, object] | None = None
     as_of: str | None = None
     sample_seed: int | None = None
-    allow_nondeterministic: bool = False
+    nondeterministic_reason: str | None = None
     extractor: WarehouseExtractor | None = None
 
 
@@ -68,7 +69,7 @@ def freeze_snapshot(request: SnapshotFreezeRequest) -> DatasetManifest:
     require_deterministic_query(
         request.query,
         dialect=request.source_type,
-        allow_nondeterministic=request.allow_nondeterministic,
+        allow_nondeterministic=request.nondeterministic_reason is not None,
     )
     rewritten_query, recorded_as_of = apply_as_of(request.query, request.source_type, request.as_of)
 
@@ -95,7 +96,7 @@ def freeze_snapshot(request: SnapshotFreezeRequest) -> DatasetManifest:
         as_of=recorded_as_of,
         sample_seed=request.sample_seed,
         content_sha256=file_sha256(snapshot_path),
-        allow_nondeterministic=request.allow_nondeterministic,
+        nondeterministic_reason=request.nondeterministic_reason,
     )
     manifest.write(out_dir / MANIFEST_FILENAME)
     return manifest
@@ -148,6 +149,14 @@ def seal_snapshot(
     seal = seal_holdout(experiment_dir, search, holdout)
     snapshot.unlink()
     return seal
+
+
+def split_snapshot_without_holdout(experiment_dir: Path, time_column: str) -> None:
+    """Split the snapshot into search rows and seal nothing. Results stay exploratory."""
+    write_search_rows(
+        experiment_dir, temporal_search_split(read_snapshot(experiment_dir), time_column)
+    )
+    (experiment_dir / DATA_DIRNAME / SNAPSHOT_FILENAME).unlink()
 
 
 def _write_parquet(table: pa.Table, path: Path) -> None:

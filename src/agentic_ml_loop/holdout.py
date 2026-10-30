@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Annotated, Literal
@@ -11,14 +12,25 @@ from uuid import uuid4
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
-from agentic_ml_loop.io import file_sha256, read_text, write_json
-from agentic_ml_loop.ledger import entries_for, read_ledger, retired_count, store_lock, store_root
+from agentic_ml_loop.io import file_sha256, read_text, utc_now, write_json
+from agentic_ml_loop.ledger import (
+    LedgerEntry,
+    record_reopened,
+    retired_count,
+    store_lock,
+    store_root,
+)
 from agentic_ml_loop.paths import (
+    ATTEMPT_PATH,
     DATA_DIRNAME,
+    FINAL_PATH,
     HOLDOUT_HISTORY_DIR,
     HOLDOUT_SEAL_FILE_NAME,
+    REREADS_DIR,
+    SELECTION_PATH,
     SNAPSHOT_FILE_NAME,
     data_dir,
+    repository_relative_path,
 )
 from agentic_ml_loop.splits import HoldoutSplits, SearchSplits, Sha256
 
@@ -37,15 +49,6 @@ class HoldoutSeal(BaseModel):
 
 def sealed_file_path(seal: HoldoutSeal) -> Path:
     return store_root() / seal.experiment_uid / f"holdout-{seal.holdout_sha256}.parquet"
-
-
-def refuse_known_file(holdout_sha256: str) -> None:
-    known = entries_for(holdout_sha256)
-    if known:
-        raise ValueError(
-            f"This exact file was already {known[0].event} by experiment "
-            f"{known[0].experiment_name}. It cannot give a fresh estimate. Use unseen rows."
-        )
 
 
 def _stage_sealed_file(
@@ -106,16 +109,6 @@ def consumed_holdout_count(experiment_dir: Path) -> int:
     return retired_count(read_holdout_seal(experiment_dir).experiment_uid)
 
 
-def require_history_in_ledger(experiment_dir: Path) -> None:
-    known = {entry.holdout_sha256 for entry in read_ledger()}
-    missing = [sha for sha in history_seals(experiment_dir) if sha not in known]
-    if missing:
-        raise ValueError(
-            f"The holdout ledger lacks {len(missing)} holdouts this experiment retired. "
-            "It was deleted or replaced, so no new seal can be checked. Restore it."
-        )
-
-
 def seal_holdout(experiment_dir: Path, search: SearchSplits, holdout: HoldoutSplits) -> HoldoutSeal:
     """Write the holdout outside the workspace and leave search rows in ``data/``."""
     record_path = experiment_dir / HOLDOUT_SEAL_FILE_NAME
@@ -124,15 +117,67 @@ def seal_holdout(experiment_dir: Path, search: SearchSplits, holdout: HoldoutSpl
     with store_lock():
         if record_path.exists():
             raise ValueError(f"Holdout is already sealed: {record_path}")
-        require_history_in_ledger(experiment_dir)
         seal, staged = _stage_sealed_file(holdout.holdout, str(uuid4()), experiment_dir)
-        refuse_known_file(seal.holdout_sha256)
         place_staged_file(seal, staged)
         rows_dir = data_dir(experiment_dir)
         _write_rows(search.train, rows_dir / TRAIN_FILE_NAME)
         _write_rows(search.validation, rows_dir / VALIDATION_FILE_NAME)
         write_json(record_path, seal.model_dump())
     return seal
+
+
+def write_search_rows(experiment_dir: Path, search: SearchSplits) -> None:
+    """Write search rows with no seal. Results stay labelled exploratory."""
+    if search.train.empty or search.validation.empty:
+        raise ValueError("Train and validation rows must both be non-empty")
+    rows_dir = data_dir(experiment_dir)
+    _write_rows(search.train, rows_dir / TRAIN_FILE_NAME)
+    _write_rows(search.validation, rows_dir / VALIDATION_FILE_NAME)
+
+
+def _archive_read(experiment_dir: Path) -> None:
+    """Keep the evidence of a read that later work replaces."""
+    root = experiment_dir / REREADS_DIR
+    target = root / f"{sum(1 for _ in root.glob('[0-9]*')) + 1:04d}"
+    target.mkdir(parents=True)
+    for relative in (SELECTION_PATH, ATTEMPT_PATH, FINAL_PATH):
+        evidence = experiment_dir / relative
+        if evidence.exists():
+            shutil.copy2(evidence, target / evidence.name)
+
+
+def replace_read_evidence(experiment_dir: Path) -> None:
+    """Archive the attempt and the final, and keep the selection, for a second read of it."""
+    _archive_read(experiment_dir)
+    (experiment_dir / ATTEMPT_PATH).unlink(missing_ok=True)
+    (experiment_dir / FINAL_PATH).unlink(missing_ok=True)
+
+
+def withdraw_selection(experiment_dir: Path, reread_reason: str | None) -> None:
+    """Reopen search. Before a read this costs nothing. After a read it needs a recorded reason."""
+    has_read = (experiment_dir / ATTEMPT_PATH).exists() or (experiment_dir / FINAL_PATH).exists()
+    if has_read:
+        if reread_reason is None:
+            raise ValueError(
+                "This selection's holdout was read. Further search or selection is "
+                "holdout-informed. Seal unseen rows with `experiment reseal`, or pass "
+                "`--allow-reread --reason <text>`, which labels the result exploratory."
+            )
+        seal = read_holdout_seal(experiment_dir)
+        record_reopened(
+            LedgerEntry(
+                holdout_sha256=seal.holdout_sha256,
+                event="reopened",
+                experiment_uid=seal.experiment_uid,
+                experiment_name=experiment_dir.resolve().name,
+                experiment_path=repository_relative_path(experiment_dir),
+                provenance_note=reread_reason,
+                recorded_at=utc_now(),
+            )
+        )
+        _archive_read(experiment_dir)
+    for relative in (SELECTION_PATH, ATTEMPT_PATH, FINAL_PATH):
+        (experiment_dir / relative).unlink(missing_ok=True)
 
 
 def load_search_splits(experiment_dir: Path) -> SearchSplits:
@@ -144,7 +189,9 @@ def load_search_splits(experiment_dir: Path) -> SearchSplits:
     train_path = rows_dir / TRAIN_FILE_NAME
     validation_path = rows_dir / VALIDATION_FILE_NAME
     if not train_path.is_file() or not validation_path.is_file():
-        raise FileNotFoundError(f"No search rows in {rows_dir}. Seal the holdout first.")
+        raise FileNotFoundError(
+            f"No search rows in {rows_dir}. Run `init-demo` or `experiment seal` first."
+        )
     return SearchSplits(
         train=pd.read_parquet(train_path), validation=pd.read_parquet(validation_path)
     )
@@ -153,7 +200,9 @@ def load_search_splits(experiment_dir: Path) -> SearchSplits:
 def read_holdout_seal(experiment_dir: Path) -> HoldoutSeal:
     path = experiment_dir / HOLDOUT_SEAL_FILE_NAME
     if not path.is_file():
-        raise FileNotFoundError(f"No holdout seal at {path}. Seal the holdout first.")
+        raise FileNotFoundError(
+            f"No holdout seal at {path}. Add one with `experiment reseal --rows <parquet> --note <text>`."
+        )
     return HoldoutSeal.model_validate_json(read_text(path))
 
 
@@ -183,10 +232,10 @@ def check_replacement_rows(experiment_dir: Path, rows: pd.DataFrame) -> None:
 
 
 def stage_replacement_rows(
-    experiment_dir: Path, retiring: HoldoutSeal, rows: pd.DataFrame
+    experiment_dir: Path, experiment_uid: str, rows: pd.DataFrame
 ) -> tuple[HoldoutSeal, Path]:
     """Store new rows under a staging name. Nothing the experiment reads has changed yet."""
-    return _stage_sealed_file(rows, retiring.experiment_uid, experiment_dir)
+    return _stage_sealed_file(rows, experiment_uid, experiment_dir)
 
 
 def commit_seal(experiment_dir: Path, seal: HoldoutSeal) -> None:

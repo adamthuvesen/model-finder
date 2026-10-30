@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import secrets
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,12 +13,24 @@ from pathlib import Path
 import pandas as pd
 
 from agentic_ml_loop.candidate_result import CandidateRunner
-from agentic_ml_loop.cli.errors import run_reporting_errors, warn_rows_stay_readable
-from agentic_ml_loop.final_evaluation import evaluate_final, freeze_candidate
-from agentic_ml_loop.holdout import seal_holdout
-from agentic_ml_loop.paths import HOLDOUT_SEAL_FILE_NAME
+from agentic_ml_loop.cli.errors import (
+    override_reason,
+    run_reporting_errors,
+    warn_if_already_read,
+    warn_rows_stay_readable,
+)
+from agentic_ml_loop.final_evaluation import (
+    assess_final,
+    evaluate_final,
+    freeze_candidate,
+    load_verified_final,
+    selection_staleness,
+)
+from agentic_ml_loop.holdout import TRAIN_FILE_NAME, seal_holdout, write_search_rows
+from agentic_ml_loop.paths import DATA_DIRNAME, HOLDOUT_SEAL_FILE_NAME
 from agentic_ml_loop.runner import ExperimentSeed, init_experiment_dir, save_candidate_result
-from agentic_ml_loop.splits import temporal_split
+from agentic_ml_loop.splits import temporal_search_split, temporal_split
+from agentic_ml_loop.validation import hyperparameter_warnings
 
 
 @dataclass(frozen=True)
@@ -25,12 +38,30 @@ class RunnerConfig:
     seed: ExperimentSeed
     candidate_runners: Mapping[str, CandidateRunner]
     rows_loader: Callable[[int], pd.DataFrame]
-    # Required, so that an author decides. None means no local file holds the rows.
-    rows_source: Path | None
     time_column: str
     target_column: str
     code_root: Path
     config_files: tuple[Path, ...] = ()
+    # The local file that rows_loader reads, if any. Sealing warns that its rows stay readable.
+    rows_source: Path | None = None
+
+
+def _add_reread_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--allow-reread",
+        action="store_true",
+        help="Continue after a holdout read. Recorded, and labelled exploratory",
+    )
+    parser.add_argument("--reason", default=None, help="Why. Required with --allow-reread")
+
+
+def _reread_reason(args: argparse.Namespace) -> str | None:
+    return override_reason("--allow-reread", allowed=args.allow_reread, reason=args.reason)
+
+
+def _warn_stale(messages: list[str]) -> None:
+    for message in messages:
+        print(f"warning: {message}", file=sys.stderr)
 
 
 def _parser(config: RunnerConfig) -> argparse.ArgumentParser:
@@ -42,6 +73,9 @@ def _parser(config: RunnerConfig) -> argparse.ArgumentParser:
     init.add_argument("--experiment", required=True, help="New experiment directory")
     init.add_argument("--force", action="store_true", help="Reseed files; keeps holdout evidence")
     init.add_argument(
+        "--no-holdout", action="store_true", help="Seal nothing. Results stay labelled exploratory"
+    )
+    init.add_argument(
         "--data-seed", type=int, default=None, help="Rows to generate. Default: a new random seed"
     )
 
@@ -49,23 +83,43 @@ def _parser(config: RunnerConfig) -> argparse.ArgumentParser:
     run = subparsers.add_parser("run-candidate", help="Run one candidate on search rows")
     run.add_argument("--experiment", required=True)
     run.add_argument("--candidate", required=True, choices=candidates)
+    _add_reread_arguments(run)
 
     freeze = subparsers.add_parser("freeze-candidate", help="Freeze a verified candidate")
     freeze.add_argument("--experiment", required=True)
     freeze.add_argument("--candidate", required=True, choices=candidates)
+    _add_reread_arguments(freeze)
 
     final = subparsers.add_parser("evaluate-final", help="Score the frozen candidate once")
     final.add_argument("--experiment", required=True)
+    _add_reread_arguments(final)
     return parser
 
 
-def _init(config: RunnerConfig, experiment_dir: Path, *, force: bool, data_seed: int | None) -> str:
+def _init(
+    config: RunnerConfig,
+    experiment_dir: Path,
+    *,
+    force: bool,
+    data_seed: int | None,
+    no_holdout: bool,
+) -> str:
     init_experiment_dir(experiment_dir, config.seed, force=force)
     if (experiment_dir / HOLDOUT_SEAL_FILE_NAME).exists():
         return f"Initialized {experiment_dir}. Its holdout was already sealed."
+    if (experiment_dir / DATA_DIRNAME / TRAIN_FILE_NAME).exists():
+        return f"Initialized {experiment_dir}. It already has search rows and no holdout."
     seed = secrets.randbits(32) if data_seed is None else data_seed
-    search, holdout = temporal_split(config.rows_loader(seed), config.time_column)
+    rows = config.rows_loader(seed)
+    if no_holdout:
+        write_search_rows(experiment_dir, temporal_search_split(rows, config.time_column))
+        return (
+            f"Initialized {experiment_dir} with no holdout. Results stay labelled exploratory. "
+            "Add a holdout later with `experiment reseal`."
+        )
+    search, holdout = temporal_split(rows, config.time_column)
     seal = seal_holdout(experiment_dir, search, holdout)
+    warn_if_already_read(seal.holdout_sha256)
     if config.rows_source is not None:
         warn_rows_stay_readable(config.rows_source)
     return f"Initialized {experiment_dir}. Sealed {seal.holdout_rows} holdout rows."
@@ -80,7 +134,15 @@ def run_runner_main(config: RunnerConfig, argv: list[str] | None = None) -> int:
             return 0
         experiment_dir = Path(args.experiment).resolve()
         if args.command == "init-demo":
-            print(_init(config, experiment_dir, force=args.force, data_seed=args.data_seed))
+            print(
+                _init(
+                    config,
+                    experiment_dir,
+                    force=args.force,
+                    data_seed=args.data_seed,
+                    no_holdout=args.no_holdout,
+                )
+            )
         elif args.command == "run-candidate":
             result = save_candidate_result(
                 experiment_dir,
@@ -88,7 +150,9 @@ def run_runner_main(config: RunnerConfig, argv: list[str] | None = None) -> int:
                 config.candidate_runners,
                 config.code_root,
                 config.config_files,
+                reread_reason=_reread_reason(args),
             )
+            _warn_stale(hyperparameter_warnings([result]))
             print(
                 json.dumps(
                     {
@@ -100,11 +164,26 @@ def run_runner_main(config: RunnerConfig, argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "freeze-candidate":
-            selection = freeze_candidate(experiment_dir, args.candidate, config.target_column)
+            selection = freeze_candidate(
+                experiment_dir,
+                args.candidate,
+                config.target_column,
+                reread_reason=_reread_reason(args),
+            )
             print(selection.model_dump_json(indent=2))
+            _warn_stale(selection_staleness(experiment_dir, selection))
         else:
-            final = evaluate_final(experiment_dir, config.candidate_runners)
+            final = evaluate_final(
+                experiment_dir, config.candidate_runners, reread_reason=_reread_reason(args)
+            )
             print(final.model_dump_json(indent=2))
+            selection, _ = load_verified_final(experiment_dir)
+            _warn_stale(
+                [
+                    *selection_staleness(experiment_dir, selection),
+                    *assess_final(experiment_dir, final).warnings,
+                ]
+            )
         return 0
 
     return run_reporting_errors(dispatch)

@@ -31,6 +31,10 @@ class DataAudit(BaseModel):
     concerns: list[str]
 
 
+# No source: a judgement default. Below this share, overlap only warns.
+LARGE_OVERLAP_SHARE = 0.10
+
+
 class OverlapReport(BaseModel):
     """Rows shared between splits. ``None`` means undeclared keys or a listed failed comparison."""
 
@@ -42,9 +46,10 @@ class OverlapReport(BaseModel):
     train_validation_keys: int | None
     search_holdout_keys: int | None
     not_comparable: list[str]
+    holdout_rows: int
 
     @property
-    def needs_acknowledgement(self) -> bool:
+    def needs_warning(self) -> bool:
         return bool(self.not_comparable) or any(
             (
                 self.train_validation_exact_rows,
@@ -53,6 +58,11 @@ class OverlapReport(BaseModel):
                 self.search_holdout_keys,
             )
         )
+
+    @property
+    def is_large(self) -> bool:
+        shared = max(self.search_holdout_exact_rows or 0, self.search_holdout_keys or 0)
+        return shared >= LARGE_OVERLAP_SHARE * self.holdout_rows
 
 
 def _is_binary(values: pd.Series) -> bool:
@@ -122,6 +132,10 @@ def _shared_rows(left: pd.DataFrame, right: pd.DataFrame, columns: list[str]) ->
     return len(left[columns].drop_duplicates().merge(right[columns].drop_duplicates(), on=columns))
 
 
+def _with_keys(rows: pd.DataFrame, key_columns: list[str]) -> pd.DataFrame:
+    return rows.dropna(subset=[column for column in key_columns if column in rows.columns])
+
+
 def overlap_report(
     search: SearchSplits, holdout: HoldoutSplits, key_columns: list[str]
 ) -> OverlapReport:
@@ -134,13 +148,13 @@ def overlap_report(
     if key_columns:
         # A missing key identifies nothing, so NaN keys never count as shared.
         counts["train_validation_keys"] = _shared_rows(
-            search.train.dropna(subset=key_columns),
-            search.validation.dropna(subset=key_columns),
+            _with_keys(search.train, key_columns),
+            _with_keys(search.validation, key_columns),
             key_columns,
         )
         counts["search_holdout_keys"] = _shared_rows(
-            search_rows.dropna(subset=key_columns),
-            holdout.holdout.dropna(subset=[c for c in key_columns if c in holdout.holdout.columns]),
+            _with_keys(search_rows, key_columns),
+            _with_keys(holdout.holdout, key_columns),
             key_columns,
         )
     return OverlapReport(
@@ -150,4 +164,5 @@ def overlap_report(
         train_validation_keys=counts.get("train_validation_keys"),
         search_holdout_keys=counts.get("search_holdout_keys"),
         not_comparable=[name for name, count in counts.items() if count is None],
+        holdout_rows=len(holdout.holdout),
     )

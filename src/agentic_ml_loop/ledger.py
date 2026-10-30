@@ -27,7 +27,7 @@ class LedgerEntry(BaseModel):
 
     schema_version: Literal[2] = 2
     holdout_sha256: Sha256
-    event: Literal["evaluated", "finalized", "retired"]
+    event: Literal["evaluated", "finalized", "reopened", "retired"]
     experiment_uid: str
     experiment_name: str
     experiment_path: str
@@ -97,15 +97,16 @@ def _append(entry: LedgerEntry) -> None:
 
 
 def claim_for_evaluation(entry: LedgerEntry) -> None:
-    """Record the read before it happens. Any entry for this file, anywhere, refuses it."""
+    """Record the read before it happens. A known file needs a recorded reason in the entry."""
     with _exclusive("ledger.lock"):
         known = entries_for(entry.holdout_sha256)
-        if known:
+        if known and entry.provenance_note is None:
             first = known[0]
             raise ValueError(
                 f"This holdout file was already {first.event} by experiment "
-                f"{first.experiment_name} ({first.experiment_uid}). It cannot give a fresh "
-                "estimate. Seal unseen rows with `experiment reseal`."
+                f"{first.experiment_name} ({first.experiment_uid}). Seal unseen rows with "
+                "`experiment reseal`, or read it again with `--allow-reread --reason <text>`, "
+                "which labels the estimate exploratory."
             )
         _append(entry)
 
@@ -119,6 +120,12 @@ def record_retirement(entry: LedgerEntry) -> None:
             for known_entry in known
         ):
             _append(entry)
+
+
+def record_reopened(entry: LedgerEntry) -> None:
+    """Record that search continued after a read, which makes later choices holdout-informed."""
+    with _exclusive("ledger.lock"):
+        _append(entry)
 
 
 def record_final(entry: LedgerEntry) -> None:

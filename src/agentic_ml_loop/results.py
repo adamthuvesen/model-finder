@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
@@ -15,7 +16,7 @@ from agentic_ml_loop.candidate_result import (
     Direction,
     canonical_objective_metric,
 )
-from agentic_ml_loop.io import file_sha256, write_json
+from agentic_ml_loop.io import file_sha256, json_text, write_json
 from agentic_ml_loop.paths import RESULTS_LOCK_FILE_NAME
 from agentic_ml_loop.splits import SearchDataIdentity, Sha256
 
@@ -105,14 +106,20 @@ def ranked_results(results: list[RecordedResult]) -> list[RecordedResult]:
     )
 
 
-def write_results(experiment_dir: Path, results: list[RecordedResult]) -> None:
+def _results_payload(results: list[RecordedResult]) -> list[dict[str, Any]]:
     errors = comparison_errors(results)
     if errors:
         raise ValueError("; ".join(errors))
-    write_json(
-        results_path(experiment_dir),
-        [result.model_dump(mode="json") for result in ranked_results(results)],
-    )
+    return [result.model_dump(mode="json") for result in ranked_results(results)]
+
+
+def write_results(experiment_dir: Path, results: list[RecordedResult]) -> None:
+    write_json(results_path(experiment_dir), _results_payload(results))
+
+
+def results_text_sha256(results: list[RecordedResult]) -> str:
+    """Return the hash the leaderboard file would have, before anything is written."""
+    return hashlib.sha256(json_text(_results_payload(results)).encode()).hexdigest()
 
 
 @contextmanager

@@ -1,26 +1,33 @@
-"""Bind a research conclusion to the evidence that was reviewed."""
+"""Label a research conclusion by the evidence behind it."""
 
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from agentic_ml_loop.final_evaluation import load_verified_final
-from agentic_ml_loop.holdout import consumed_holdout_count
+from agentic_ml_loop.final_evaluation import (
+    assess_final,
+    evidence_labels,
+    holdout_read_labels,
+    load_verified_final,
+)
+from agentic_ml_loop.holdout import read_holdout_seal
 from agentic_ml_loop.io import read_text, write_json
 from agentic_ml_loop.paths import (
     COMPLETION_PATH,
     FINAL_PATH,
+    HOLDOUT_SEAL_FILE_NAME,
     REVIEW_PATH,
     SPECIFICATION_FILE_NAME,
 )
 from agentic_ml_loop.results import RESULTS_FILE_NAME, RecordedResult, load_results
-from agentic_ml_loop.run_evidence import validate_run_evidence
+from agentic_ml_loop.run_evidence import run_evidence_staleness, validate_run_evidence
 from agentic_ml_loop.splits import Sha256
-from agentic_ml_loop.validation import validate_experiment
+from agentic_ml_loop.validation import NO_HOLDOUT_WARNING, validate_experiment
 
 
 class EvidenceFile(BaseModel):
@@ -36,18 +43,17 @@ class CompletionRecord(BaseModel):
     schema_version: Literal[1] = 1
     outcome: Literal["supported", "no_demonstrated_improvement", "inconclusive"]
     conclusion: str = Field(min_length=1)
-    limitations: list[str] = Field(min_length=1)
+    limitations: list[str] = Field(default_factory=list[str])
     selected_candidate_id: str | None = None
     baseline_candidate_id: str | None = None
     comparison_candidate_id: str | None = None
-    acknowledged_prior_holdouts: int = 0
     acknowledged_overlap: str | None = None
     specification: EvidenceFile
     results: EvidenceFile
-    report: EvidenceFile
-    evaluation: EvidenceFile
-    review: EvidenceFile
-    reproduction: EvidenceFile
+    report: EvidenceFile | None = None
+    evaluation: EvidenceFile | None = None
+    review: EvidenceFile | None = None
+    reproduction: EvidenceFile | None = None
 
 
 class ResearchReview(BaseModel):
@@ -58,10 +64,10 @@ class ResearchReview(BaseModel):
     verdict: Literal["accepted", "changes_requested"]
     specification_sha256: Sha256
     results_sha256: Sha256
-    report_sha256: Sha256
-    evaluation_sha256: Sha256
-    findings: list[str]
-    limitations: list[str] = Field(min_length=1)
+    report_sha256: Sha256 | None = None
+    evaluation_sha256: Sha256 | None = None
+    findings: list[str] = Field(default_factory=list[str])
+    limitations: list[str] = Field(default_factory=list[str])
 
 
 def _confined_file(experiment_dir: Path, relative_path: str) -> Path:
@@ -87,158 +93,184 @@ def _load_record(experiment_dir: Path) -> CompletionRecord:
     return CompletionRecord.model_validate_json(read_text(path))
 
 
-def _reference_errors(experiment_dir: Path, record: CompletionRecord) -> list[str]:
-    references = {
-        "specification": record.specification,
-        "results": record.results,
-        "report": record.report,
-        "evaluation": record.evaluation,
-        "review": record.review,
-        "reproduction": record.reproduction,
-    }
-    errors: list[str] = []
-    if record.specification.path != SPECIFICATION_FILE_NAME:
-        errors.append(f"Completion specification must reference {SPECIFICATION_FILE_NAME}")
-    if record.results.path != RESULTS_FILE_NAME:
-        errors.append(f"Completion results must reference {RESULTS_FILE_NAME}")
-    if not record.report.path.startswith("outputs/"):
-        errors.append("Completion report must be under outputs/")
-    for name, reference in references.items():
+@dataclass
+class CompletionStatus:
+    """One result for a person to read. Errors block. Exploratory reasons and warnings only label."""
+
+    errors: list[str] = field(default_factory=list[str])
+    exploratory: list[str] = field(default_factory=list[str])
+    warnings: list[str] = field(default_factory=list[str])
+
+    @property
+    def label(self) -> str:
+        if self.errors:
+            return "not complete"
+        return "complete, exploratory" if self.exploratory else "complete"
+
+
+def _check_references(
+    experiment_dir: Path, record: CompletionRecord, status: CompletionStatus
+) -> None:
+    """A changed number file blocks. A changed narrative file warns."""
+    for name, reference, blocks in (
+        ("results", record.results, True),
+        ("evaluation", record.evaluation, True),
+        ("specification", record.specification, False),
+        ("report", record.report, False),
+        ("review", record.review, False),
+        ("reproduction", record.reproduction, False),
+    ):
+        if reference is None:
+            continue
         try:
-            if evidence_file(experiment_dir, reference.path).sha256 != reference.sha256:
-                errors.append(f"Stale {name} evidence: {reference.path}")
+            if evidence_file(experiment_dir, reference.path).sha256 == reference.sha256:
+                continue
+            problem = f"Stale {name} evidence: {reference.path}. Run record-completion again."
         except ValueError as exc:
-            errors.append(str(exc))
-    return errors
+            problem = str(exc)
+        (status.errors if blocks else status.warnings).append(problem)
 
 
-def _review_errors(experiment_dir: Path, record: CompletionRecord) -> list[str]:
+def _check_review(experiment_dir: Path, record: CompletionRecord, status: CompletionStatus) -> None:
+    if record.review is None:
+        status.warnings.append("No independent review was recorded.")
+        return
     try:
         review = ResearchReview.model_validate_json(
             read_text(_confined_file(experiment_dir, record.review.path))
         )
     except (OSError, ValueError, ValidationError) as exc:
-        return [f"Invalid independent review: {exc}"]
-    errors: list[str] = []
+        status.warnings.append(f"The review cannot be read: {exc}")
+        return
     if review.verdict != "accepted":
-        errors.append("Independent review requests changes")
+        status.errors.append("The independent review requests changes.")
     for name, reviewed, current in (
-        ("specification", review.specification_sha256, record.specification.sha256),
-        ("results", review.results_sha256, record.results.sha256),
-        ("report", review.report_sha256, record.report.sha256),
-        ("evaluation", review.evaluation_sha256, record.evaluation.sha256),
+        ("specification", review.specification_sha256, record.specification),
+        ("results", review.results_sha256, record.results),
+        ("report", review.report_sha256, record.report),
+        ("evaluation", review.evaluation_sha256, record.evaluation),
     ):
-        if reviewed != current:
-            errors.append(f"Independent review did not review current {name}")
-    return errors
+        if reviewed is not None and current is not None and reviewed != current.sha256:
+            status.warnings.append(f"The review did not cover the current {name}.")
 
 
-def _comparison_errors(record: CompletionRecord) -> list[str]:
+def _comparison_warnings(record: CompletionRecord) -> list[str]:
     if record.outcome == "inconclusive":
         return []
-    errors: list[str] = []
-    selected, baseline, comparison = (
-        record.selected_candidate_id,
-        record.baseline_candidate_id,
-        record.comparison_candidate_id,
-    )
-    retains_baseline = record.outcome == "no_demonstrated_improvement" and selected == baseline
+    selected, baseline = record.selected_candidate_id, record.baseline_candidate_id
     if not selected or not baseline:
-        errors.append("A supported comparison requires a selected candidate and baseline")
-    elif selected == baseline and not (retains_baseline and comparison and comparison != baseline):
-        errors.append(
-            "Selected candidate and baseline must be distinct, "
-            "or retaining the baseline requires a distinct tested comparison candidate"
-        )
-    if comparison is not None and not retains_baseline:
-        errors.append(
-            "An explicit comparison candidate is only valid when retaining the baseline "
-            "after no demonstrated improvement"
-        )
-    return errors
+        return ["The conclusion names no selected candidate or no baseline."]
+    if selected == baseline and not record.comparison_candidate_id:
+        return ["The selected candidate is the baseline, and no tested challenger is named."]
+    return []
 
 
-def _final_evidence_errors(experiment_dir: Path, record: CompletionRecord) -> list[str]:
-    """Bind a claim about a model to the real freeze and final evaluation."""
-    if record.outcome == "inconclusive":
-        if not record.evaluation.path.startswith("outputs/"):
-            return ["Completion evaluation must be under outputs/"]
-        return []
-    if record.evaluation.path != FINAL_PATH:
-        return [f"Completion evaluation must reference {FINAL_PATH}"]
-    try:
-        selection, final = load_verified_final(experiment_dir)
-    except (OSError, ValueError) as exc:
-        return [f"Invalid final evidence: {exc}"]
-    errors: list[str] = []
-    frozen = selection.selected_result.candidate_id
-    if record.selected_candidate_id != frozen:
-        errors.append(f"Completion selects {record.selected_candidate_id}, but {frozen} was frozen")
-    if final.overlap.needs_acknowledgement and not (
-        record.acknowledged_overlap and record.acknowledged_overlap.strip()
-    ):
-        errors.append(
-            f"The final evaluation reports shared or incomparable rows: {final.overlap.model_dump()}. "
-            "Say why that is acceptable in acknowledged_overlap."
-        )
-    return errors
+def _check_final(experiment_dir: Path, record: CompletionRecord, status: CompletionStatus) -> None:
+    """Forged or edited evidence blocks. A missing or reused holdout only labels the result."""
+    if (experiment_dir / FINAL_PATH).is_file():
+        try:
+            selection, final = load_verified_final(experiment_dir)
+        except (OSError, ValueError) as exc:
+            status.errors.append(f"Invalid final evidence: {exc}")
+            return
+        frozen = selection.selected_result.candidate_id
+        if record.selected_candidate_id != frozen:
+            status.errors.append(
+                f"Completion selects {record.selected_candidate_id}, but {frozen} was frozen"
+            )
+        assessment = assess_final(experiment_dir, final)
+        status.exploratory.extend(assessment.exploratory)
+        status.warnings.extend(assessment.warnings)
+        if final.overlap.is_large and not (record.acknowledged_overlap or "").strip():
+            status.errors.append(
+                "A large share of holdout rows also appears in search rows. "
+                "Say why that is acceptable with --acknowledged-overlap <text>."
+            )
+        return
+    if not (experiment_dir / HOLDOUT_SEAL_FILE_NAME).is_file():
+        status.exploratory.append("No holdout was sealed. Scores come from validation rows.")
+        return
+    status.exploratory.append("A holdout is sealed, but no final evaluation is on record.")
+    status.exploratory.extend(
+        holdout_read_labels(experiment_dir, read_holdout_seal(experiment_dir))
+    )
 
 
-def _candidate_errors(
-    experiment_dir: Path, record: CompletionRecord, results: list[RecordedResult]
+def _check_candidates(
+    experiment_dir: Path,
+    record: CompletionRecord,
+    results: list[RecordedResult],
+    status: CompletionStatus,
 ) -> list[str]:
-    errors = [
-        error for result in results for error in validate_run_evidence(experiment_dir, result)
-    ]
-    by_id = {result.candidate_id: result for result in results}
-    for candidate_id in (
-        record.selected_candidate_id,
-        record.baseline_candidate_id,
-        record.comparison_candidate_id,
-    ):
-        if candidate_id is None:
+    """Return what changed since the runs, which warns unless a strict check was asked for."""
+    stale: list[str] = []
+    for result in results:
+        problems = validate_run_evidence(experiment_dir, result)
+        status.errors.extend(problems)
+        if not problems:
+            stale.extend(run_evidence_staleness(experiment_dir, result))
+    known = {result.candidate_id for result in results}
+    status.errors.extend(
+        f"Completion references unknown candidate: {candidate_id}"
+        for candidate_id in (
+            record.selected_candidate_id,
+            record.baseline_candidate_id,
+            record.comparison_candidate_id,
+        )
+        if candidate_id is not None and candidate_id not in known
+    )
+    return stale
+
+
+def assess_completion(
+    experiment_dir: Path, record: CompletionRecord | None = None, *, strict: bool = False
+) -> CompletionStatus:
+    """Give one labelled result. ``strict`` turns every label and warning into a failure."""
+    status = CompletionStatus()
+    for message in validate_experiment(experiment_dir):
+        if message == NO_HOLDOUT_WARNING:
             continue
-        entry = by_id.get(candidate_id)
-        if entry is None:
-            errors.append(f"Completion references unknown candidate: {candidate_id}")
-        elif entry.comparison_context.spec_sha256 != record.specification.sha256:
-            errors.append(f"Candidate used a different specification: {candidate_id}")
-    return errors
-
-
-def check_completion(experiment_dir: Path, record: CompletionRecord | None = None) -> list[str]:
-    errors = [
-        message
-        for message in validate_experiment(experiment_dir)
-        if not message.startswith("warning:")
-    ]
-    if errors:
-        return errors
+        if message.startswith("warning: "):
+            status.warnings.append(message.removeprefix("warning: "))
+        else:
+            status.errors.append(message)
+    if status.errors:
+        return status
     if record is None:
+        if not (experiment_dir / COMPLETION_PATH).is_file():
+            status.errors.append(
+                "No completion record. Run `experiment record-completion --experiment "
+                f"{experiment_dir} --outcome <outcome> --conclusion <text>`."
+            )
+            return status
         try:
             record = _load_record(experiment_dir)
         except (OSError, ValueError, ValidationError) as exc:
-            return [f"Invalid completion record: {exc}"]
-    errors = _reference_errors(experiment_dir, record)
-    if errors:
-        return errors
-    retired = consumed_holdout_count(experiment_dir)
-    if record.acknowledged_prior_holdouts != retired:
-        errors.append(
-            f"This experiment retired {retired} holdouts. Earlier estimates are exploratory. "
-            "Set acknowledged_prior_holdouts to that count and say so in the limitations."
-        )
-    return [
-        *errors,
-        *_review_errors(experiment_dir, record),
-        *_comparison_errors(record),
-        *_final_evidence_errors(experiment_dir, record),
-        *_candidate_errors(experiment_dir, record, load_results(experiment_dir)),
-    ]
+            status.errors.append(f"Invalid completion record: {exc}")
+            return status
+    _check_references(experiment_dir, record, status)
+    if status.errors:
+        return status
+    _check_review(experiment_dir, record, status)
+    status.warnings.extend(_comparison_warnings(record))
+    status.exploratory.extend(evidence_labels(experiment_dir))
+    _check_final(experiment_dir, record, status)
+    stale = _check_candidates(experiment_dir, record, load_results(experiment_dir), status)
+    if strict:
+        status.errors.extend([*stale, *status.exploratory, *status.warnings])
+    else:
+        status.warnings.extend(stale)
+    return status
+
+
+def check_completion(
+    experiment_dir: Path, record: CompletionRecord | None = None, *, strict: bool = False
+) -> list[str]:
+    return assess_completion(experiment_dir, record, strict=strict).errors
 
 
 def save_completion(experiment_dir: Path, record: CompletionRecord) -> Path:
-    """Save a record only after its evidence passes the completion check."""
+    """Save a record unless something blocks it."""
     errors = check_completion(experiment_dir, record)
     if errors:
         raise ValueError("; ".join(errors))
@@ -247,23 +279,32 @@ def save_completion(experiment_dir: Path, record: CompletionRecord) -> Path:
     return path
 
 
+def _optional_evidence(experiment_dir: Path, relative_path: str | None) -> EvidenceFile | None:
+    return evidence_file(experiment_dir, relative_path) if relative_path else None
+
+
+def _final_if_present(experiment_dir: Path) -> str | None:
+    return FINAL_PATH if (experiment_dir / FINAL_PATH).is_file() else None
+
+
 def write_review(
     experiment_dir: Path,
     reviewer: str,
     verdict: Literal["accepted", "changes_requested"],
-    report_path: str,
-    evaluation_path: str,
+    report_path: str | None,
     findings: list[str],
     limitations: list[str],
 ) -> Path:
     """Bind a reviewer's verdict to the current hashes of what was reviewed."""
+    report = _optional_evidence(experiment_dir, report_path)
+    evaluation = _optional_evidence(experiment_dir, _final_if_present(experiment_dir))
     review = ResearchReview(
         reviewer=reviewer,
         verdict=verdict,
         specification_sha256=evidence_file(experiment_dir, SPECIFICATION_FILE_NAME).sha256,
         results_sha256=evidence_file(experiment_dir, RESULTS_FILE_NAME).sha256,
-        report_sha256=evidence_file(experiment_dir, report_path).sha256,
-        evaluation_sha256=evidence_file(experiment_dir, evaluation_path).sha256,
+        report_sha256=report.sha256 if report else None,
+        evaluation_sha256=evaluation.sha256 if evaluation else None,
         findings=findings,
         limitations=limitations,
     )
@@ -274,20 +315,20 @@ def write_review(
 
 def record_from_evidence(
     experiment_dir: Path,
-    report_path: str,
-    evaluation_path: str,
-    reproduction_path: str,
+    report_path: str | None,
+    reproduction_path: str | None,
     **claim: object,
 ) -> CompletionRecord:
-    """Build a record whose references carry the current hash of each file."""
+    """Build a record whose references carry the current hash of each file that exists."""
+    review_path = REVIEW_PATH if (experiment_dir / REVIEW_PATH).is_file() else None
     return CompletionRecord.model_validate(
         {
             **claim,
             "specification": evidence_file(experiment_dir, SPECIFICATION_FILE_NAME),
             "results": evidence_file(experiment_dir, RESULTS_FILE_NAME),
-            "report": evidence_file(experiment_dir, report_path),
-            "evaluation": evidence_file(experiment_dir, evaluation_path),
-            "review": evidence_file(experiment_dir, REVIEW_PATH),
-            "reproduction": evidence_file(experiment_dir, reproduction_path),
+            "report": _optional_evidence(experiment_dir, report_path),
+            "evaluation": _optional_evidence(experiment_dir, _final_if_present(experiment_dir)),
+            "review": _optional_evidence(experiment_dir, review_path),
+            "reproduction": _optional_evidence(experiment_dir, reproduction_path),
         }
     )

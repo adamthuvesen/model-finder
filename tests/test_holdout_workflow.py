@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import sys
 import threading
 from pathlib import Path
 
@@ -14,10 +13,10 @@ import pytest
 
 from agentic_ml_loop import final_evaluation
 from agentic_ml_loop.candidate_result import CandidateRunner
-from agentic_ml_loop.cli.main import main
 from agentic_ml_loop.completion import (
     CompletionRecord,
     ResearchReview,
+    assess_completion,
     check_completion,
     evidence_file,
 )
@@ -158,11 +157,13 @@ def test_retired_unread_holdout_cannot_be_read(scored: Path, code_root: Path, mo
         evaluate_final(scored, RUNNERS)
 
 
-def test_returning_to_an_earlier_file_is_refused(scored: Path) -> None:
+def test_returning_to_an_earlier_file_needs_a_reason_to_read_it(scored: Path) -> None:
     original = pd.read_parquet(sealed_file_path(read_holdout_seal(scored)))
     reseal_holdout(scored, _new_rows(), "First.")
-    with pytest.raises(ValueError, match="already retired"):
-        reseal_holdout(scored, original, "Back to the first file.")
+    reseal_holdout(scored, original, "Back to the first file.")
+    freeze_candidate(scored, "candidate-a", "label")
+    with pytest.raises(ValueError, match="allow-reread"):
+        evaluate_final(scored, RUNNERS)
 
 
 def _write_review_and_record(path: Path, **fields: object) -> CompletionRecord:
@@ -201,7 +202,7 @@ def _write_review_and_record(path: Path, **fields: object) -> CompletionRecord:
     )
 
 
-def test_hand_written_final_evidence_fails_completion(scored: Path) -> None:
+def test_final_evidence_the_ledger_never_saw_is_labelled_unverified(scored: Path) -> None:
     selection = freeze_candidate(scored, "candidate-a", "label")
     seal = read_holdout_seal(scored)
     selection_sha = evidence_file(scored, "work/selection.json").sha256
@@ -221,6 +222,7 @@ def test_hand_written_final_evidence_fails_completion(scored: Path) -> None:
         "metrics": {"auc": 0.999},
         "selection_metrics": selection.selected_result.metrics.model_dump(),
         "prior_holdouts": 0,
+        "exploratory_reasons": [],
         "holdout_target_concern": None,
         "overlap": {
             "key_columns": [],
@@ -229,13 +231,17 @@ def test_hand_written_final_evidence_fails_completion(scored: Path) -> None:
             "train_validation_keys": None,
             "search_holdout_keys": None,
             "not_comparable": [],
+            "holdout_rows": seal.holdout_rows,
         },
         "limitations": [],
     }
     write_json(scored / FINAL_PATH, forged)
-    record = _write_review_and_record(scored)
-    errors = check_completion(scored, record)
-    assert any("ledger has no evaluation" in error for error in errors)
+    status = assess_completion(
+        scored, _write_review_and_record(scored, comparison_candidate_id=None)
+    )
+    assert status.errors == []
+    assert status.label == "complete, exploratory"
+    assert any("no record of this read" in reason for reason in status.exploratory)
 
 
 def test_real_final_evidence_chains_to_the_ledger(scored: Path) -> None:
@@ -246,9 +252,7 @@ def test_real_final_evidence_chains_to_the_ledger(scored: Path) -> None:
     assert entry.attempt_sha256 == evidence_file(scored, ATTEMPT_PATH).sha256
 
 
-def test_overlap_is_reported_and_completion_requires_acknowledgement(
-    tmp_path: Path, code_root: Path
-) -> None:
+def test_large_overlap_needs_a_one_line_reason(tmp_path: Path, code_root: Path) -> None:
     path = tmp_path / "overlapping"
     init_experiment_dir(path, ExperimentSeed("overlapping"))
     (path / "experiment.md").write_text(SPEC + "\nkey_columns: when\n")
@@ -262,13 +266,15 @@ def test_overlap_is_reported_and_completion_requires_acknowledgement(
     assert final.overlap.search_holdout_keys == 150
     assert final.overlap.key_columns == ["when"]
     errors = check_completion(path, _write_review_and_record(path))
-    assert any("reports shared or incomparable rows" in error for error in errors)
-    assert not any(
-        "reports shared or incomparable rows" in error
-        for error in check_completion(
-            path, _write_review_and_record(path, acknowledged_overlap="Known duplicates.")
-        )
+    assert any("--acknowledged-overlap" in error for error in errors)
+    status = assess_completion(
+        path,
+        _write_review_and_record(
+            path, acknowledged_overlap="Known duplicates.", comparison_candidate_id=None
+        ),
     )
+    assert status.errors == []
+    assert status.label == "complete, exploratory"
 
 
 def test_freeze_reports_drift_without_reading_the_holdout(sealed: Path, code_root: Path) -> None:
@@ -278,19 +284,6 @@ def test_freeze_reports_drift_without_reading_the_holdout(sealed: Path, code_roo
     sealed_file_path(read_holdout_seal(sealed)).unlink()
     audit = freeze_candidate(sealed, "candidate-a", "label").data_audit
     assert any("validation target rate differs" in concern for concern in audit.concerns)
-
-
-def test_rows_inside_the_experiment_are_refused(scored: Path, capsys) -> None:
-    inside = scored / "work" / "nested" / "rows.parquet"
-    inside.parent.mkdir(parents=True)
-    _new_rows().to_parquet(inside, index=False)
-    code = main(["reseal", "--experiment", str(scored), "--rows", str(inside), "--note", "x"])
-    assert code == 1
-    assert "outside the experiment" in capsys.readouterr().err
-    linked = scored.parent / "link.parquet"
-    linked.symlink_to(inside)
-    assert main(["reseal", "--experiment", str(scored), "--rows", str(linked), "--note", "x"]) == 1
-    assert read_ledger() == []
 
 
 def test_concurrent_seals_cannot_mix_datasets(tmp_path: Path, monkeypatch) -> None:
@@ -355,11 +348,10 @@ def test_freeze_requires_the_target_column(scored: Path) -> None:
         freeze_candidate(scored, "candidate-a", "absent")
 
 
-def test_lost_ledger_fails_closed_for_this_experiments_history(scored: Path) -> None:
+def test_lost_ledger_does_not_stop_a_reseal(scored: Path) -> None:
     reseal_holdout(scored, _new_rows(), "First retirement.")
     (store_root() / "ledger.jsonl").unlink()
-    with pytest.raises(ValueError, match="ledger lacks"):
-        reseal_holdout(scored, _new_rows(seed=100), "Second retirement.")
+    assert reseal_holdout(scored, _new_rows(seed=100), "Second retirement.")
 
 
 def test_corrupt_ledger_fails_closed(scored: Path) -> None:
@@ -385,18 +377,19 @@ def _completion_errors(path: Path, **fields: object) -> list[str]:
     return check_completion(path, _write_review_and_record(path, **fields))
 
 
-def test_kill_after_the_attempt_leaves_no_completable_state(scored: Path, monkeypatch) -> None:
+def test_forged_final_after_a_kill_blocks_completion(scored: Path) -> None:
     freeze_candidate(scored, "candidate-a", "label")
-    genuine_metrics = {"auc": 0.999}
 
-    def crash(_rows: pd.DataFrame) -> dict[str, float]:
-        raise RuntimeError("killed after the attempt")
+    def killed(splits):
+        result = fitted(splits)
 
-    def runner(splits):
-        return type(fitted(splits))(result=fitted(splits).result, score_rows=crash)
+        def crash(_rows: pd.DataFrame) -> dict[str, float]:
+            raise RuntimeError("killed after the attempt")
+
+        return type(result)(result=result.result, score_rows=crash)
 
     with pytest.raises(RuntimeError):
-        evaluate_final(scored, {"candidate-a": runner})
+        evaluate_final(scored, {"candidate-a": killed})
     selection = final_evaluation.FrozenSelection.model_validate_json(
         (scored / "work/selection.json").read_text()
     )
@@ -407,9 +400,10 @@ def test_kill_after_the_attempt_leaves_no_completable_state(scored: Path, monkey
         attempt_sha256=evidence_file(scored, ATTEMPT_PATH).sha256,
         holdout=attempt.holdout,
         completed_at="x",
-        metrics=genuine_metrics,
+        metrics={"auc": 0.999},
         selection_metrics=selection.selected_result.metrics,
         prior_holdouts=0,
+        exploratory_reasons=[],
         holdout_target_concern=None,
         overlap=OverlapReport(
             key_columns=[],
@@ -418,6 +412,7 @@ def test_kill_after_the_attempt_leaves_no_completable_state(scored: Path, monkey
             train_validation_keys=None,
             search_holdout_keys=None,
             not_comparable=[],
+            holdout_rows=attempt.holdout.holdout_rows,
         ),
         limitations=[],
     )
@@ -433,18 +428,15 @@ def test_editing_a_genuine_final_fails_completion(scored: Path) -> None:
     assert any("edited or forged" in error for error in _completion_errors(scored))
 
 
-def test_refused_reseal_changes_nothing(scored: Path) -> None:
-    used = _experiment(scored.parent / "other", scored.parent / "candidate_code", seed=77)
-    known = pd.read_parquet(sealed_file_path(read_holdout_seal(used)))
-    _freeze_and_evaluate(used)
-    freeze_candidate(scored, "candidate-a", "label")
+def test_resealing_the_read_live_holdout_changes_nothing(scored: Path) -> None:
     seal = read_holdout_seal(scored)
-    with pytest.raises(ValueError, match="already evaluated"):
-        reseal_holdout(scored, known, "Known rows.")
+    same_rows = pd.read_parquet(sealed_file_path(seal))
+    _freeze_and_evaluate(scored)
+    events = [entry.event for entry in read_ledger()]
+    with pytest.raises(ValueError, match="already read"):
+        reseal_holdout(scored, same_rows, "Same rows.")
     assert read_holdout_seal(scored) == seal
-    assert entries_for(seal.holdout_sha256) == []
-    assert (scored / "work/selection.json").is_file()
-    assert evaluate_final(scored, RUNNERS).holdout == seal
+    assert [entry.event for entry in read_ledger()] == events
 
 
 def test_retry_after_commit_is_a_no_op_and_keeps_fresh_rows(scored: Path, monkeypatch) -> None:
@@ -505,9 +497,7 @@ def test_holdout_equal_to_train_with_one_nan_is_counted(tmp_path: Path, code_roo
     assert overlap.search_holdout_exact_rows == len(copied) - 1
 
 
-def test_a_comparison_that_cannot_run_requires_acknowledgement(
-    tmp_path: Path, code_root: Path
-) -> None:
+def test_a_comparison_that_cannot_run_warns(tmp_path: Path, code_root: Path) -> None:
     path = tmp_path / "text"
     init_experiment_dir(path, ExperimentSeed("text"))
     (path / "experiment.md").write_text(SPEC)
@@ -517,8 +507,9 @@ def test_a_comparison_that_cannot_run_requires_acknowledgement(
     freeze_candidate(path, "candidate-a", "label")
     final = evaluate_final(path, _text_tolerant_runners())
     assert final.overlap.not_comparable == ["search_holdout_exact_rows"]
-    errors = _completion_errors(path)
-    assert any("shared or incomparable" in error for error in errors)
+    status = assess_completion(path, _write_review_and_record(path, comparison_candidate_id=None))
+    assert status.errors == []
+    assert any("could not run" in warning for warning in status.warnings)
 
 
 def _text_tolerant_runners() -> dict[str, CandidateRunner]:
@@ -531,12 +522,11 @@ def _text_tolerant_runners() -> dict[str, CandidateRunner]:
     return {"candidate-a": runner}
 
 
-def test_key_misspelled_after_freeze_fails_before_the_read(scored: Path) -> None:
+def test_key_misspelled_after_freeze_reports_instead_of_losing_the_read(scored: Path) -> None:
     freeze_candidate(scored, "candidate-a", "label")
     (scored / "experiment.md").write_text(SPEC + "\nkey_columns: wehn\n")
-    with pytest.raises(ValueError, match="stale"):
-        evaluate_final(scored, RUNNERS)
-    assert read_ledger() == []
+    final = evaluate_final(scored, RUNNERS)
+    assert "train_validation_keys" in final.overlap.not_comparable
 
 
 def test_misspelled_key_fails_the_freeze_before_any_read(sealed: Path, code_root: Path) -> None:
@@ -570,39 +560,12 @@ def test_swapped_search_rows_fail_completion(scored: Path) -> None:
     assert any("Search data changed" in error for error in _completion_errors(scored))
 
 
-def test_copied_evidence_fails_completion_in_the_copy(scored: Path) -> None:
+def test_copied_evidence_warns_in_the_copy(scored: Path) -> None:
     _freeze_and_evaluate(scored)
     copy = scored.parent / "copied"
     shutil.copytree(scored, copy)
-    assert any("does not carry over" in error for error in _completion_errors(copy))
-
-
-def test_rows_through_workspace_symlink_and_case_variant_are_refused(
-    scored: Path, tmp_path: Path, capsys
-) -> None:
-    outside = tmp_path / "rows.parquet"
-    _new_rows().to_parquet(outside, index=False)
-    link = scored / "work" / "link.parquet"
-    link.symlink_to(outside)
-    assert main(["reseal", "--experiment", str(scored), "--rows", str(link), "--note", "x"]) == 1
-    directory_link = tmp_path / "alias"
-    directory_link.symlink_to(scored)
-    inside = scored / "work" / "rows.parquet"
-    _new_rows().to_parquet(inside, index=False)
-    through_alias = directory_link / "work" / "rows.parquet"
-    assert (
-        main(["reseal", "--experiment", str(scored), "--rows", str(through_alias), "--note", "x"])
-        == 1
-    )
-    variant = scored.parent / scored.name.upper() / "work" / "rows.parquet"
-    if sys.platform == "darwin":
-        assert variant.exists()
-        assert (
-            main(["reseal", "--experiment", str(scored), "--rows", str(variant), "--note", "x"])
-            == 1
-        )
-    assert "outside the experiment" in capsys.readouterr().err
-    assert read_ledger() == []
+    status = assess_completion(copy, _write_review_and_record(copy))
+    assert any("was produced in" in warning for warning in status.warnings)
 
 
 def test_corrupt_ledger_error_names_the_file_and_line(scored: Path) -> None:
@@ -671,8 +634,30 @@ def test_moving_the_whole_repository_keeps_valid_evidence(tmp_path: Path) -> Non
     assert _supported_errors(moved / "experiments" / "run") == []
 
 
-def test_copy_to_a_sibling_directory_in_the_repository_fails(tmp_path: Path) -> None:
+def test_copy_to_a_sibling_directory_in_the_repository_warns(tmp_path: Path) -> None:
     experiment = _evaluated_in_repository(tmp_path)
     sibling = experiment.parent / "sibling"
     shutil.copytree(experiment, sibling)
-    assert any("does not carry over" in error for error in _supported_errors(sibling))
+    status = assess_completion(
+        sibling,
+        _write_review_and_record(
+            sibling,
+            outcome="supported",
+            baseline_candidate_id="candidate-b",
+            comparison_candidate_id=None,
+        ),
+    )
+    assert status.errors == []
+    assert any("was produced in" in warning for warning in status.warnings)
+
+
+def test_completion_must_select_the_frozen_candidate(tmp_path: Path) -> None:
+    experiment = _evaluated_in_repository(tmp_path)
+    errors = _completion_errors(
+        experiment,
+        outcome="supported",
+        selected_candidate_id="candidate-b",
+        baseline_candidate_id="candidate-a",
+        comparison_candidate_id=None,
+    )
+    assert errors == ["Completion selects candidate-b, but candidate-a was frozen"]

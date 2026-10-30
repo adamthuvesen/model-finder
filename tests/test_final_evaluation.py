@@ -63,7 +63,7 @@ def _mutate_selection(path: Path) -> None:
     (path / SELECTION_PATH).write_text("{}")
 
 
-@pytest.mark.parametrize("mutate", [_mutate_results, _mutate_spec, _mutate_selection])
+@pytest.mark.parametrize("mutate", [_mutate_results, _mutate_selection])
 def test_stale_selection_prevents_the_final_fit(scored: Path, mutate) -> None:
     freeze(scored)
     mutate(scored)
@@ -76,12 +76,15 @@ def test_stale_selection_prevents_the_final_fit(scored: Path, mutate) -> None:
     assert not (scored / ATTEMPT_PATH).exists()
 
 
-def test_changed_code_prevents_the_final_fit(scored: Path, code_root: Path) -> None:
+def test_changed_code_or_spec_is_recorded_and_does_not_stop_the_final(
+    scored: Path, code_root: Path
+) -> None:
     freeze(scored)
     (code_root / "candidate_module.py").write_text("VERSION = 2\n")
-    with pytest.raises(ValueError, match="fingerprint"):
-        evaluate_final(scored, RUNNERS)
-    assert not (scored / ATTEMPT_PATH).exists()
+    _mutate_spec(scored)
+    final = evaluate_final(scored, RUNNERS)
+    assert any("Code or dependencies changed" in text for text in final.limitations)
+    assert any("specification changed" in text for text in final.limitations)
 
 
 def test_changed_search_rows_prevent_the_final_fit(scored: Path) -> None:

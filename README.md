@@ -16,8 +16,8 @@ The repo keeps its name from the supervisor loop it used to be.
 
 The loop, its runner presets, the referee, and the benchmark are gone. To keep using them, check
 out the git tag `loop-final`. To move forward, start a `/goal` as shown below. Old `results.json`
-files fail validation, because they lack the new required fields and many hold test metrics.
-Preserve them and rerun candidates in a new experiment.
+files fail validation, because many hold test metrics. Preserve them and rerun candidates in a new
+experiment.
 
 ## Try it offline
 
@@ -26,6 +26,13 @@ Requires Python 3.13+ and `uv`. This costs nothing and calls no LLM.
 ```bash
 uv sync --extra models
 demo() { uv run --extra models python -m demos.demo_bootstrap "$@"; }
+
+# First leaderboard: three commands, with no holdout. Results stay labelled exploratory.
+demo init-demo --experiment experiments/quick --no-holdout
+demo run-candidate --experiment experiments/quick --candidate logreg-tiny
+uv run experiment leaderboard experiments/quick
+
+# The recommended path seals a holdout:
 demo init-demo --experiment experiments/my_run          # seeds files, seals the holdout
 demo run-candidate --experiment experiments/my_run --candidate majority-baseline
 demo run-candidate --experiment experiments/my_run --candidate logreg-tiny
@@ -35,10 +42,68 @@ uv run experiment validate experiments/my_run
 uv run experiment replay experiments/my_run           # writes outputs/replay.html
 ```
 
-`evaluate-final` fails until you freeze a selection. Sealed rows are written under
+`evaluate-final` needs a frozen selection. A second read needs `--allow-reread --reason <text>`, and it labels the
+estimate exploratory. Sealed rows are written under
 `$XDG_DATA_HOME/agentic-ml-loop/holdouts/`, defaulting to `~/.local/share`.
 Open [`examples/demo_bootstrap_replay.html`](examples/demo_bootstrap_replay.html) to see a replay
 without running anything.
+
+## Use your own CSV
+
+Put this file at `my_model/run.py`. The runner fingerprints its own folder, so keep data and experiments outside it.
+
+```python
+from pathlib import Path
+
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score
+
+from agentic_ml_loop.candidate_result import CandidateResult, FittedCandidate, SearchMetrics
+from agentic_ml_loop.cli.runner import RunnerConfig, run_runner_main
+from agentic_ml_loop.runner import ExperimentSeed
+
+CSV, TARGET, FEATURES = Path("rows.csv"), "label", ["x"]
+
+
+def logreg(splits):
+    model = LogisticRegression().fit(splits.train[FEATURES], splits.train[TARGET])
+
+    def score(rows):
+        return {"auc": float(roc_auc_score(rows[TARGET], model.predict_proba(rows[FEATURES])[:, 1]))}
+
+    metrics = score(splits.validation)
+    result = CandidateResult(
+        candidate_id="logreg",
+        objective_metric="val_auc",
+        objective_score=metrics["auc"],
+        metrics=SearchMetrics(validation=metrics),
+    )
+    return FittedCandidate(result=result, score_rows=score)
+
+
+raise SystemExit(
+    run_runner_main(
+        RunnerConfig(
+            seed=ExperimentSeed("my_run"),
+            candidate_runners={"logreg": logreg},
+            rows_loader=lambda seed: pd.read_csv(CSV),
+            rows_source=CSV,
+            time_column="when",
+            target_column=TARGET,
+            code_root=Path(__file__).parent,
+        )
+    )
+)
+```
+
+```bash
+uv run --extra models python my_model/run.py init-demo --experiment experiments/my_run --no-holdout
+uv run --extra models python my_model/run.py run-candidate --experiment experiments/my_run --candidate logreg
+uv run experiment leaderboard experiments/my_run
+```
+
+Drop `--no-holdout` to seal a holdout. The sealed rows stay readable in `rows.csv`, and the seal warns about that.
 
 ## Run research
 
@@ -49,7 +114,8 @@ Inside Claude Code or Codex, start one goal that names the skill and the experim
 ```
 
 To create a new experiment from a dataset, use the `experiment-spec` skill.
-Finish with `uv run experiment complete-check experiments/my_run`.
+Finish with `uv run experiment complete-check experiments/my_run`. It prints `complete`, `complete, exploratory`,
+or `not complete`.
 [docs/evidence.md](docs/evidence.md) explains the chain and what it does not prove.
 
 ## Replacing a read holdout
@@ -60,9 +126,8 @@ If a holdout informed a decision, seal new rows:
 uv run experiment reseal --experiment experiments/my_run --rows new_rows.parquet --note "Why, and where the rows came from"
 ```
 
-Search reopens, the old estimate stays on record as exploratory, and completion must acknowledge it.
-A holdout's identity is its sealed file's hash. A file already read or retired is refused, in any
-experiment. The engine does not recognize similar data: [docs/evidence.md](docs/evidence.md) lists the limits.
+Search reopens, and the old estimate stays on record as exploratory. A holdout's identity is its sealed file's
+hash. Reading a file a second time, in any experiment, needs `--allow-reread --reason <text>`. The engine does not recognize similar data: [docs/evidence.md](docs/evidence.md) lists the limits.
 
 ## Demos
 
@@ -75,7 +140,7 @@ experiment. The engine does not recognize similar data: [docs/evidence.md](docs/
 
 All data is synthetic and generated in memory. Run `python -m demos.<demo> list-candidates`.
 Each `init-demo` generates new rows, so you can run a demo as many times as you like.
-Repeating a `--data-seed` whose holdout was read or retired is refused.
+Evaluating a repeated `--data-seed` whose holdout was read needs `--allow-reread --reason <text>`.
 
 ## Warehouse snapshots (optional)
 
@@ -91,7 +156,7 @@ uv run experiment seal --experiment experiments/<id> --time-column event_date
 
 A pull creates the directory and writes `data/snapshot.parquet` and `dataset_manifest.json`. The
 manifest holds the query, as-of point, schema hash, and content hash. Pulls refuse any write, and no
-flag overrides that. They also refuse queries that are not reproducible or that sqlglot cannot parse.
+flag overrides that. They also refuse queries that are not reproducible, unless you pass `--allow-nondeterministic --reason <text>`, which labels the result exploratory, and queries that sqlglot cannot parse.
 A pull into a sealed experiment is refused, because it would put holdout rows back. Each source has a `SETUP.md` under
 [`src/agentic_ml_loop/sources/bundles/`](src/agentic_ml_loop/sources/bundles/). DuckDB and local
 Postgres are tested end to end. The other connectors are tested against mocked clients.

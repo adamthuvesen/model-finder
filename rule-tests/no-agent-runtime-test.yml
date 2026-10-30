@@ -5,3 +5,4 @@ valid:
 invalid:
   - __import__("subprocess")
   - importlib.import_module("anthropic")
+  - importlib.import_module("concurrent.futures")

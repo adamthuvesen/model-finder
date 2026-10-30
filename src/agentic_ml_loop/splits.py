@@ -64,6 +64,26 @@ def search_data_identity(splits: SearchSplits) -> SearchDataIdentity:
     )
 
 
+def _time_ordered(rows: pd.DataFrame, time_column: str) -> pd.DataFrame:
+    if time_column not in rows.columns:
+        raise ValueError(f"Time column is missing: {time_column}")
+    if len(rows) < MINIMUM_SPLIT_ROWS:
+        raise ValueError(f"Dataset too small to split: {len(rows)} rows (minimum 10)")
+    return rows.sort_values(time_column).reset_index(drop=True)
+
+
+def temporal_search_split(
+    rows: pd.DataFrame, time_column: str, *, train_fraction: float = 0.75
+) -> SearchSplits:
+    """Order rows by time into train and validation, and keep no holdout."""
+    ordered = _time_ordered(rows, time_column)
+    train_end = int(len(ordered) * train_fraction)
+    return SearchSplits(
+        train=ordered.iloc[:train_end].reset_index(drop=True),
+        validation=ordered.iloc[train_end:].reset_index(drop=True),
+    )
+
+
 def temporal_split(
     rows: pd.DataFrame,
     time_column: str,
@@ -72,13 +92,9 @@ def temporal_split(
     validation_fraction: float = 0.2,
 ) -> tuple[SearchSplits, HoldoutSplits]:
     """Order rows by time. The latest rows become the holdout."""
-    if time_column not in rows.columns:
-        raise ValueError(f"Time column is missing: {time_column}")
     if train_fraction <= 0 or validation_fraction <= 0 or train_fraction + validation_fraction >= 1:
         raise ValueError("Train and validation fractions must be positive and leave a holdout")
-    if len(rows) < MINIMUM_SPLIT_ROWS:
-        raise ValueError(f"Dataset too small to split: {len(rows)} rows (minimum 10)")
-    ordered = rows.sort_values(time_column).reset_index(drop=True)
+    ordered = _time_ordered(rows, time_column)
     train_end = int(len(ordered) * train_fraction)
     validation_end = int(len(ordered) * (train_fraction + validation_fraction))
     return (

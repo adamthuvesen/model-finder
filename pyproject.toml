@@ -117,7 +117,6 @@ addopts = "-v --tb=short"
 [tool.ruff]
 line-length = 100
 target-version = "py313"
-extend-exclude = ["experiments/*/scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
@@ -134,6 +133,8 @@ ignore = ["E501", "TRY003", "PLR2004", "PLR0913", "ANN401"]
 "langchain".msg = "No agent SDK. The native goal owns execution."
 "subprocess".msg = "No process spawn. That is how an agent runner starts."
 "multiprocessing".msg = "No process spawn. That is how an agent runner starts."
+"concurrent.futures.ProcessPoolExecutor".msg = "No process spawn. That is how an agent runner starts."
+"concurrent.futures.process".msg = "No process spawn. That is how an agent runner starts."
 "pty".msg = "No process spawn. That is how an agent runner starts."
 "asyncio.create_subprocess_exec".msg = "No process spawn. That is how an agent runner starts."
 "asyncio.create_subprocess_shell".msg = "No process spawn. That is how an agent runner starts."
@@ -150,6 +151,8 @@ ignore = ["E501", "TRY003", "PLR2004", "PLR0913", "ANN401"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["TID251", "S101", "S108", "S603", "S607", "B010", "ANN", "ARG", "PLC0415", "SLF001", "FBT", "T20", "TRY", "PTH123"]
+# One-shot scripts answer only to the banned imports (TID).
+"experiments/*/scripts/**" = ["E", "F", "I", "B", "UP", "SIM", "S", "BLE", "TRY", "PTH", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
 "demos/**" = ["S", "BLE", "TRY", "PTH", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
 # The command line is the one place that prints.
 "src/agentic_ml_loop/cli/*.py" = ["T201"]
@@ -158,6 +161,7 @@ ignore = ["E501", "TRY003", "PLR2004", "PLR0913", "ANN401"]
 
 [tool.ruff.format]
 quote-style = "double"
+exclude = ["experiments/*/scripts/**"]
 
 [tool.basedpyright]
 pythonVersion = "3.13"
@@ -176,6 +180,8 @@ ignore_decorators = ["@model_validator", "@field_validator"]
 # Serialized Pydantic fields, the console script, torch's forward, and the public helpers
 # that experiment scripts call. Vulture sees none of these callers.
 ignore_names = [
+    "nondeterministic_reason",
+    "holdout_rows", "exploratory_reasons", "label",
     "validate_label_dates",
     "model_config", "schema_version", "config_files", "train_target_mean", "validation_target_mean", "holdout_target_concern", "event", "experiment_name", "recorded_at", "provenance_note", "experiment_path", "not_comparable", "train_validation_exact_rows", "search_holdout_exact_rows", "train_validation_keys", "search_holdout_keys", "limitations", "status", "split_strategy", "reviewer",
     "resealed_at", "python", "pulled_at", "prior_holdouts", "manifest_version", "finished_at",

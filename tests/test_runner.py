@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from agentic_ml_loop.final_evaluation import evaluate_final, freeze_candidate
 from agentic_ml_loop.results import load_results
-from agentic_ml_loop.run_evidence import RunEvidence
+from agentic_ml_loop.run_evidence import RunEvidence, run_evidence_staleness
 from agentic_ml_loop.runner import ExperimentSeed, init_experiment_dir, save_candidate_result
 from agentic_ml_loop.splits import SearchSplits
 from tests.conftest import fitted
@@ -27,7 +27,7 @@ def test_unknown_candidate_is_reported_before_loading_data(tmp_path: Path, code_
 
 def test_unsealed_experiment_has_no_search_rows(tmp_path: Path, code_root: Path) -> None:
     experiment = init_experiment_dir(tmp_path / "fresh", ExperimentSeed("fresh"))
-    with pytest.raises(FileNotFoundError, match="Seal the holdout"):
+    with pytest.raises(FileNotFoundError, match="No search rows"):
         save_candidate_result(experiment, "candidate-a", {"candidate-a": fitted}, code_root)
 
 
@@ -108,10 +108,10 @@ def test_legacy_leaderboard_with_holdout_metrics_fails_loudly(
         save_candidate_result(sealed, "candidate-a", {"candidate-a": fitted}, code_root)
 
 
-def test_freeze_blocks_further_search(scored: Path, code_root: Path) -> None:
+def test_a_new_run_before_any_read_withdraws_the_selection(scored: Path, code_root: Path) -> None:
     freeze_candidate(scored, "candidate-a", "label")
-    with pytest.raises(ValueError, match="Selection is frozen"):
-        save_candidate_result(scored, "candidate-a", {"candidate-a": fitted}, code_root)
+    save_candidate_result(scored, "candidate-a", {"candidate-a": fitted}, code_root)
+    assert not (scored / "work/selection.json").exists()
 
 
 def test_init_seeds_the_layout_and_keeps_edits_without_force(tmp_path: Path) -> None:
@@ -136,9 +136,11 @@ def test_init_seeds_the_layout_and_keeps_edits_without_force(tmp_path: Path) -> 
 def test_any_file_in_the_experiment_package_makes_evidence_stale(
     scored: Path, code_root: Path, name: str
 ) -> None:
+    selected = load_results(scored)[0]
+    assert run_evidence_staleness(scored, selected) == []
     (code_root / name).write_text("1\n")
-    with pytest.raises(ValueError, match="fingerprint is stale"):
-        freeze_candidate(scored, "candidate-a", "label")
+    assert "Code or dependencies changed" in run_evidence_staleness(scored, selected)[0]
+    freeze_candidate(scored, "candidate-a", "label")
 
 
 def test_declared_config_file_is_fingerprinted(
@@ -147,11 +149,10 @@ def test_declared_config_file_is_fingerprinted(
     config = tmp_path / "params.json"
     config.write_text("{}")
     save_candidate_result(sealed, "candidate-a", {"candidate-a": fitted}, code_root, [config])
-    freeze_candidate(sealed, "candidate-a", "label")
-    (sealed / "work/selection.json").unlink()
+    selected = load_results(sealed)[0]
+    assert run_evidence_staleness(sealed, selected) == []
     config.write_text('{"a": 1}')
-    with pytest.raises(ValueError, match="fingerprint is stale"):
-        freeze_candidate(sealed, "candidate-a", "label")
+    assert "Code or dependencies changed" in run_evidence_staleness(sealed, selected)[0]
 
 
 def test_force_refuses_to_erase_consumed_holdout_evidence(scored: Path, code_root: Path) -> None:

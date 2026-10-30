@@ -92,14 +92,14 @@ drive() {
     final-after-freeze)
       check final-freeze freeze-candidate 0 "selected_result" demo freeze-candidate --experiment "$x" --candidate logreg-tiny || return 1
       check final-after-freeze evaluate-final 0 "holdout_sha256" demo evaluate-final --experiment "$x" || return 1
-      check final-search-blocked run-candidate 1 "Selection is frozen" demo run-candidate --experiment "$x" --candidate logreg-tiny
+      check final-search-blocked run-candidate 1 "holdout-informed" demo run-candidate --experiment "$x" --candidate logreg-tiny
       ;;
     complete)
       printf 'logreg-tiny beats the baseline.\n' >"$x/outputs/report.md"
       printf 'See README.md.\n' >"$x/outputs/reproduce.md"
       check record-review record-review 0 "Review recorded" experiment_cli record-review --experiment "$x" --reviewer verify --verdict accepted --report outputs/report.md --limitation "Synthetic data." || return 1
       check record-completion record-completion 0 "Completion recorded" experiment_cli record-completion --experiment "$x" --outcome supported --conclusion "logreg-tiny beats the baseline." --limitation "Synthetic data." --selected logreg-tiny --baseline majority-baseline --report outputs/report.md --reproduction outputs/reproduce.md || return 1
-      check complete-check complete-check 0 "check passed" experiment_cli complete-check "$x" || return 1
+      check complete-check complete-check 0 "Result: complete" experiment_cli complete-check "$x" || return 1
       cp "$x/outputs/final_evaluation.json" "$STATE/final.json"
       printf ' ' >>"$x/outputs/final_evaluation.json"
       check complete-check-edited complete-check 1 "Stale evaluation" experiment_cli complete-check "$x" || return 1

@@ -10,7 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from agentic_ml_loop.candidate_result import CandidateRunner, canonical_objective_metric
-from agentic_ml_loop.holdout import load_search_splits
+from agentic_ml_loop.holdout import load_search_splits, withdraw_selection
 from agentic_ml_loop.io import file_sha256, utc_now, write_text
 from agentic_ml_loop.paths import (
     ATTEMPT_PATH,
@@ -18,7 +18,6 @@ from agentic_ml_loop.paths import (
     HOLDOUT_SEAL_FILE_NAME,
     JOURNAL_FILE_NAME,
     RESEARCH_SOURCES_FILE_NAME,
-    SELECTION_PATH,
     SPECIFICATION_FILE_NAME,
     WORK_DIRNAME,
 )
@@ -47,25 +46,22 @@ from agentic_ml_loop.splits import search_data_identity
 from agentic_ml_loop.validation import SEEDED_DIRECTORIES, SEEDED_FILES
 
 
-def _reject_frozen(experiment_dir: Path, message: str) -> None:
-    if (experiment_dir / SELECTION_PATH).exists():
-        raise ValueError(message)
-
-
 def save_candidate_result(
     experiment_dir: Path,
     candidate_id: str,
     candidate_runners: Mapping[str, CandidateRunner],
     code_root: Path,
     config_files: Sequence[Path] = (),
+    *,
+    reread_reason: str | None = None,
 ) -> RecordedResult:
-    """Run one candidate and merge its validated result into the leaderboard."""
+    """Run one candidate and merge its result. A frozen selection is withdrawn, since it no longer covers the leaderboard."""
     if not experiment_dir.is_dir():
         raise FileNotFoundError(f"Experiment directory does not exist: {experiment_dir}")
     if candidate_id not in candidate_runners:
         known = ", ".join(sorted(candidate_runners)) or "none"
         raise ValueError(f"Unknown candidate '{candidate_id}'. Available: {known}")
-    _reject_frozen(experiment_dir, "Selection is frozen. Preserve it and start a new experiment.")
+    withdraw_selection(experiment_dir, reread_reason)
     comparison_problems = comparison_errors(load_results(experiment_dir))
     if comparison_problems:
         raise ValueError("; ".join(comparison_problems))
@@ -112,7 +108,7 @@ def save_candidate_result(
         runtime_seconds=runtime_seconds,
     )
     with results_lock(experiment_dir):
-        _reject_frozen(experiment_dir, "Selection was frozen while the candidate was running")
+        withdraw_selection(experiment_dir, reread_reason)
         others = [r for r in load_results(experiment_dir) if r.candidate_id != candidate_id]
         write_run_evidence(experiment_dir, evidence)
         write_results(experiment_dir, [*others, recorded])

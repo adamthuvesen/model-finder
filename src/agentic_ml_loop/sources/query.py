@@ -261,7 +261,7 @@ def require_deterministic_query(
     if reasons:
         raise NonDeterministicQueryError(
             "Query is not reproducible (" + "; ".join(reasons) + "). "
-            "Add an ORDER BY / fixed seed, or pass --allow-nondeterministic to override."
+            "Add an ORDER BY / fixed seed, or pass --allow-nondeterministic --reason <text>, which labels the result exploratory."
         )
     if _uses_moving_time(tree):
         warnings.warn(

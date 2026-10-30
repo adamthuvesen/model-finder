@@ -5,6 +5,7 @@ message: The native goal runs the agent. Ruff TID251 bans the imports; this catc
 files:
   - src/**/*.py
   - demos/**/*.py
+  - experiments/*/scripts/**/*.py
 rule:
   any:
     - pattern: __import__($$$)
@@ -17,4 +18,4 @@ rule:
             field: arguments
             has:
               kind: string
-              regex: (subprocess|multiprocessing|anthropic|openai|claude|pty|asyncio)
+              regex: (subprocess|multiprocessing|concurrent|anthropic|openai|claude|pty|asyncio)

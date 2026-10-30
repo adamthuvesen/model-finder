@@ -26,7 +26,7 @@ Done means `uv run experiment validate experiments/<slug>` passes and the checks
    `uv run experiment pull --experiment experiments/<slug> --source <type> --query @q.sql`.
    Dry-run first with `--dry-run`. Write explicit columns and an `ORDER BY` on a stable key.
    `uv run experiment sources enable <type>` prints the path of that source's setup steps.
-2. **Seal.** A sealed experiment refuses later pulls. For a snapshot, run `uv run experiment seal --experiment experiments/<slug> --time-column <column>`.
+2. **Seal.** This is the recommended path. `--no-holdout` keeps all rows for search, and results stay labelled exploratory. A sealed experiment refuses later pulls. For a snapshot, run `uv run experiment seal --experiment experiments/<slug> --time-column <column>`.
 3. **Profile** search rows: dtypes, cardinality, missingness (flag over 10%), target distribution,
    positives and the feature budget (N/10 to N/20), time range, and suspiciously high correlations.
 4. **Discover.** Read `learnings.md`. Find 2-4 references for this problem shape.

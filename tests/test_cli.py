@@ -11,10 +11,11 @@ import pytest
 from agentic_ml_loop.cli.main import CONTRACT_DOCUMENTS, main
 from agentic_ml_loop.cli.runner import RunnerConfig, run_runner_main
 from agentic_ml_loop.cli.setup import PACKAGED_SKILLS
+from agentic_ml_loop.final_evaluation import freeze_candidate
 from agentic_ml_loop.holdout import load_search_splits
 from agentic_ml_loop.ledger import store_root
 from agentic_ml_loop.paths import DATA_DIRNAME
-from agentic_ml_loop.runner import ExperimentSeed
+from agentic_ml_loop.runner import ExperimentSeed, save_candidate_result
 from agentic_ml_loop.sources import SnapshotFreezeRequest, freeze_snapshot
 from tests.conftest import fitted, rows
 
@@ -369,3 +370,104 @@ def test_another_store_replaces_the_engine_rules_and_keeps_user_rules(
         f"Read(/{second_store}/**)",
         f"Edit(/{second_store}/**)",
     ]
+
+
+_TWO_RUNNERS = {
+    "candidate-a": fitted,
+    "candidate-b": lambda splits: fitted(splits, "candidate-b"),
+}
+
+
+def _two_candidates(sealed: Path, code_root: Path) -> Path:
+    for candidate in ("candidate-a", "candidate-b", "candidate-a"):
+        save_candidate_result(sealed, candidate, _TWO_RUNNERS, code_root)
+    return sealed
+
+
+def _rebuild(path: Path) -> int:
+    return main(["rebuild-results", str(path)])
+
+
+def test_damaged_leaderboard_is_rebuilt_from_run_records(
+    sealed: Path, code_root: Path, capsys
+) -> None:
+    _two_candidates(sealed, code_root)
+    leaderboard = sealed / "results.json"
+    original = leaderboard.read_text()
+    leaderboard.write_text("{ damaged")
+    config = replace(_config(code_root), candidate_runners=_TWO_RUNNERS)
+    run = ["run-candidate", "--experiment", str(sealed), "--candidate", "candidate-b"]
+    assert run_runner_main(config, run) == 1
+    assert "experiment rebuild-results" in capsys.readouterr().err
+
+    assert _rebuild(sealed) == 0
+    assert "was invalid" in capsys.readouterr().out
+    assert leaderboard.read_text() == original
+    assert _rebuild(sealed) == 0
+    assert "already matches 2" in capsys.readouterr().out
+    assert run_runner_main(config, run) == 0
+
+
+def test_rebuild_reports_and_refuses_changes_without_a_reason(
+    sealed: Path, code_root: Path, capsys
+) -> None:
+    _two_candidates(sealed, code_root)
+    kept, dropped = json.loads((sealed / "results.json").read_text())
+    forged = {**kept, "candidate_id": "hand-written"}
+    leaderboard = sealed / "results.json"
+    leaderboard.write_text(json.dumps([forged]))
+    before = leaderboard.read_text()
+    assert _rebuild(sealed) == 1
+    err = capsys.readouterr().err
+    assert "candidate_id: hand-written ->" in err
+    assert f"Added {dropped['candidate_id']}" in err
+    assert leaderboard.read_text() == before
+
+    assert main(["rebuild-results", str(sealed), "--allow-changes"]) == 1
+    capsys.readouterr()
+    flags = ["--allow-changes", "--reason", "The leaderboard was hand-edited."]
+    assert main(["rebuild-results", str(sealed), *flags]) == 0
+    assert "Rebuilt" in capsys.readouterr().out
+    assert main(["leaderboard", str(sealed)]) == 0
+    assert "Exploratory" in capsys.readouterr().out
+
+
+def test_rebuild_refuses_an_invalid_run_record(sealed: Path, code_root: Path, capsys) -> None:
+    _two_candidates(sealed, code_root)
+    leaderboard = sealed / "results.json"
+    leaderboard.write_text("{ damaged")
+    record = next((sealed / "work/runs").glob("*.json"))
+    record.write_text("{ also damaged")
+    assert _rebuild(sealed) == 1
+    assert f"Run record {record} is invalid" in capsys.readouterr().err
+    assert leaderboard.read_text() == "{ damaged"
+
+
+def test_rebuild_refuses_a_run_record_under_another_name(
+    sealed: Path, code_root: Path, capsys
+) -> None:
+    _two_candidates(sealed, code_root)
+    record = next((sealed / "work/runs").glob("*.json"))
+    record.rename(record.with_name("00000000-0000-4000-8000-000000000000.json"))
+    assert _rebuild(sealed) == 1
+    assert "names another run" in capsys.readouterr().err
+
+
+def test_rebuild_after_freeze_keeps_or_refuses_the_frozen_leaderboard(
+    sealed: Path, code_root: Path, capsys
+) -> None:
+    _two_candidates(sealed, code_root)
+    freeze_candidate(sealed, "candidate-a", "label")
+    leaderboard = sealed / "results.json"
+    original = leaderboard.read_text()
+    leaderboard.write_text("{ damaged")
+    assert _rebuild(sealed) == 0
+    assert leaderboard.read_text() == original
+
+    latest = json.loads(original)[0]["run_id"]
+    (sealed / "work/runs" / f"{latest}.json").unlink()
+    leaderboard.write_text("{ damaged")
+    capsys.readouterr()
+    assert _rebuild(sealed) == 1
+    assert "Selection is frozen" in capsys.readouterr().err
+    assert leaderboard.read_text() == "{ damaged"

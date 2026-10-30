@@ -181,7 +181,7 @@ def test_allow_nondeterministic_does_not_allow_writes(tmp_path) -> None:
                 source_type="duckdb",
                 query=f"COPY (SELECT 1) TO '{tmp_path}/out.csv'",
                 out_dir=tmp_path / "data",
-                allow_nondeterministic=True,
+                nondeterministic_reason="A sample is enough.",
                 extractor=FailingExtractor(),
             )
         )
@@ -206,7 +206,7 @@ def test_manifest_records_the_nondeterminism_override(tmp_path) -> None:
             source_type="duckdb",
             query="select * from t limit 3",
             out_dir=tmp_path / "data",
-            allow_nondeterministic=True,
+            nondeterministic_reason="A sample is enough.",
             extractor=StaticExtractor(),
         )
     )

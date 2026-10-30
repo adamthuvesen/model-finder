@@ -71,14 +71,14 @@ def test_demo_runs_from_search_to_reviewed_completion(tmp_path: Path, capsys) ->
     assert not (experiment / "outputs/final_evaluation.json").exists()
 
     assert _demo("freeze-candidate", "--experiment", path, "--candidate", "logreg-tiny") == 0
-    assert _demo("run-candidate", "--experiment", path, "--candidate", "logreg-tiny") == 1
-    assert "Selection is frozen" in capsys.readouterr().err
-
     assert _demo("evaluate-final", "--experiment", path) == 0
     final = json.loads((experiment / "outputs/final_evaluation.json").read_text())
     assert 0.0 <= final["metrics"]["auc"] <= 1.0
     assert final["holdout"]["holdout_rows"] == 160
     assert json.loads((experiment / "results.json").read_text()) == results
+
+    assert _demo("run-candidate", "--experiment", path, "--candidate", "logreg-tiny") == 1
+    assert "holdout-informed" in capsys.readouterr().err
 
     workspace_rows = sum(
         len(pd.read_parquet(experiment / "data" / name))
@@ -89,7 +89,9 @@ def test_demo_runs_from_search_to_reviewed_completion(tmp_path: Path, capsys) ->
     assert experiment_main(["complete-check", path]) == 1
     assert _record_reviewed_conclusion(path) == 0
     assert experiment_main(["validate", path]) == 0
+    capsys.readouterr()
     assert experiment_main(["complete-check", path]) == 0
+    assert "Result: complete\n" in capsys.readouterr().out
 
     replay = tmp_path / "replay.html"
     assert experiment_main(["replay", path, "--output", str(replay)]) == 0
@@ -101,4 +103,4 @@ def test_demo_runs_from_search_to_reviewed_completion(tmp_path: Path, capsys) ->
     edited["metrics"]["auc"] = 0.999
     final_path.write_text(json.dumps(edited))
     assert experiment_main(["complete-check", path]) == 1
-    assert "Stale evaluation" in capsys.readouterr().err
+    assert "Stale evaluation" in capsys.readouterr().out

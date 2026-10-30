@@ -30,8 +30,9 @@ def run_majority_baseline(splits: SearchSplits) -> FittedCandidate:
 CANDIDATE_RUNNERS: dict[str, CandidateRunner] = {"majority-baseline": run_majority_baseline}
 ```
 
-`random_seed` is an `int`, or `None` only for a candidate with no randomness. Metric and
-hyperparameter names may not contain a `test` or `holdout` token.
+Only `candidate_id`, `objective_metric`, `objective_score`, and `metrics.validation` are required. Record a
+seed, a bootstrap count, and train metrics when you have them. Metric names may not contain a `test` or
+`holdout` token.
 
 ## Runner
 

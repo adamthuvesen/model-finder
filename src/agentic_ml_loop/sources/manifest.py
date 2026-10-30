@@ -46,6 +46,7 @@ class DatasetManifest(BaseModel):
     allow_nondeterministic: bool
     snapshot_filename: str
     pulled_at: str
+    nondeterministic_reason: str | None = None
 
     def write(self, path: Path) -> None:
         write_json(path, self.model_dump())
@@ -70,7 +71,7 @@ def dataset_manifest_from_table(
     as_of: str | None,
     sample_seed: int | None,
     content_sha256: str,
-    allow_nondeterministic: bool = False,
+    nondeterministic_reason: str | None = None,
     snapshot_filename: str = SNAPSHOT_FILENAME,
 ) -> DatasetManifest:
     """Build a manifest from an extracted Arrow *table* and its written file hash."""
@@ -87,7 +88,8 @@ def dataset_manifest_from_table(
         schema_hash=schema_fingerprint(schema),
         content_sha256=content_sha256,
         sample_seed=sample_seed,
-        allow_nondeterministic=allow_nondeterministic,
+        allow_nondeterministic=nondeterministic_reason is not None,
+        nondeterministic_reason=nondeterministic_reason,
         snapshot_filename=snapshot_filename,
         pulled_at=utc_now(),
     )
@@ -113,3 +115,14 @@ def verify_snapshot(snapshot_path: Path, manifest: DatasetManifest) -> None:
         problems.append("content hash mismatch (values changed)")
     if problems:
         raise SnapshotIntegrityError(f"{snapshot_path.name}: " + "; ".join(problems))
+
+
+def nondeterministic_pull_label(rows_dir: Path) -> str | None:
+    """Label search rows from a pull that a person allowed to be irreproducible."""
+    path = rows_dir / MANIFEST_FILENAME
+    if not path.is_file():
+        return None
+    manifest = DatasetManifest.load(path)
+    if not manifest.allow_nondeterministic:
+        return None
+    return f"The data pull is not reproducible: {manifest.nondeterministic_reason}"
