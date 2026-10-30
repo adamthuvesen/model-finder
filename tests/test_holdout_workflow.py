@@ -583,6 +583,7 @@ def test_dependency_hash_ignores_stray_egg_info_on_the_path(tmp_path: Path, monk
     egg.mkdir()
     (egg / "PKG-INFO").write_text("Name: stray\nVersion: 1\n")
     monkeypatch.syspath_prepend(str(tmp_path))
+    _dependencies_sha256.cache_clear()
     assert _dependencies_sha256() == before
 
 

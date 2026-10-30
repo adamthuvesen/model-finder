@@ -10,6 +10,18 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(git rev-parse --show-toplevel)/.venv/bin/python\" -m model_finder.cli.guard codex \"$(git rev-parse --show-toplevel)\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

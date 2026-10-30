@@ -4,11 +4,15 @@ RUN := uv run --locked --extra models --extra deep
 # `databricks` extra installs. Remove these when the connector allows the fixed versions.
 REVIEWED_VULNS := --ignore-vuln CVE-2026-49272 --ignore-vuln PYSEC-2026-4114 --ignore-vuln PYSEC-2026-3925 --ignore-vuln PYSEC-2026-3926 --ignore-vuln PYSEC-2026-3927
 
-.PHONY: quick fast verify check audit lock lint types boundaries rules deps dead test workflows secrets vulnerabilities
+.PHONY: setup quick fast verify check audit lock lint types boundaries rules deps dead test workflows secrets vulnerabilities
+
+# After a clone or a lockfile change. CI runs the same command.
+setup:
+	uv sync --locked --group dev --extra models --extra deep
 
 # Only the Python files that changed, with no tests. Measured: 0.7s for one file, 2.7s for 49.
 quick:
-	@.venv/bin/python scripts/quick.py
+	@$(RUN) python scripts/quick.py
 
 # The fast lane: every offline check, and every test outside tests/verify. CI runs it first.
 # The targets run in parallel: 12s, against 32s one after another.
@@ -16,9 +20,10 @@ fast:
 	@$(MAKE) --no-print-directory -j lock lint types boundaries rules deps dead test
 
 # tests/verify holds the slow tests: demos, end-to-end runs, hooks, and generated scripts.
-# The coverage gate needs the whole suite, so this runs every test.
+# The coverage gate adds them to the coverage that `make fast` recorded in .coverage.
 verify:
-	$(RUN) pytest --quiet -n auto --cov --cov-fail-under=89
+	@test -f .coverage || { echo "verify: no .coverage from the fast tests. Fix: run make fast first" >&2; exit 1; }
+	$(RUN) pytest --quiet -n auto tests/verify --cov --cov-append --cov-fail-under=89
 
 # The full offline gate, as CI runs it.
 check: fast verify
@@ -50,7 +55,7 @@ dead:
 	$(RUN) python scripts/dead_code.py
 
 test:
-	$(RUN) pytest --quiet -n auto --ignore=tests/verify
+	$(RUN) pytest --quiet -n auto --ignore=tests/verify --cov --cov-report=
 
 workflows:
 	$(RUN) zizmor --offline .github/workflows

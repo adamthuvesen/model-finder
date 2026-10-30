@@ -123,8 +123,7 @@ to end. The other connectors are tested against mocked clients.
 ## Develop
 
 ```bash
-uv sync --extra models --extra deep
-make quick    # only changed Python files, no tests
-make fast     # lock, ruff, strict types, import contracts, ast-grep, deptry, vulture, fast tests
-make check    # the gate: fast, then the slow tests and coverage
+make setup
 ```
+
+The check commands are in [AGENTS.md](AGENTS.md#commands).

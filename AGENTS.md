@@ -21,9 +21,10 @@ run records, and a completion check. Docs: [architecture](.agents/docs/architect
 ## Commands
 
 ```bash
+make setup            # after a clone or a lockfile change
 make quick            # only changed Python files, no tests: under 1s for one file
 make fast             # the fast lane, about 13s; the first CI job
-make verify           # slow tests in tests/verify, and coverage over the whole suite
+make verify           # slow tests in tests/verify, then the coverage gate; run make fast first
 make check            # fast, then verify: the full offline gate
 uv run experiment next
 uv run experiment contract commands
@@ -56,22 +57,24 @@ Rigour is different. It is a default with an override. Selecting on the holdout,
 are labelled choices, so do them when a person asks: `--allow-reread --reason <text>` or `--no-holdout`. Say the
 result is exploratory. Never produce a holdout number with no label.
 
-## Enforced rules
+## Enforced Rules
 
 Labels and warnings are in `experiment contract evidence`. This table lists only what code refuses.
-`tests/test_agents_table.py` fails when a name in backticks under "Enforced by" does not exist.
+Cite each check as `path::name`. `tests/test_agents_table.py` fails unless that file defines the name: a Python
+`def`, `class`, or module-level name, a Makefile target, an ast-grep rule `id`, or a dotted TOML key, where an
+`id` picks an entry from a list of tables.
 
 | Rule | Enforced by | Added | Limit |
 | --- | --- | --- | --- |
-| No agent SDK or spawned process | Ruff `TID251` in `pyproject.toml`, `rules/no-agent-runtime.yml` | 2026-11-04 | `getattr(os, ...)` passes |
-| Pulls are read-only, with no override | `require_read_only_query`, `verify_snapshot` | 2026-06-07 | Defence in depth: the warehouse role is the real guard |
-| The agent does not read the holdout store | `HOLDOUT_DENY_RULES`, which `experiment setup` writes | 2026-11-04 | Claude Code only, and a rule does not match every command form |
-| A consumer's declared claude.ai connector writes are denied | `_connector_rules`, `CONNECTOR_RULE_PREFIX` | 2026-11-06 | Claude Code only. A tool the declaration omits stays allowed |
-| Candidates receive no holdout rows, and predict never receives the target | `SearchSplits`, `scored_candidate`, `demos-cannot-reach-holdout-store` | 2026-11-04 | A script can still read the store, and a hand-built `FittedCandidate` scores its own rows |
-| A holdout read needs a reason after the first | `claim_for_evaluation`, `withdraw_selection` | 2026-11-04 | An edited ledger passes, and a new resplit is a new file |
-| Edited evidence cannot complete | `load_verified_final`, `_require_ledger_chain` | 2026-11-04 | An edited ledger passes |
-| A holdout score cannot enter search metrics by name | `SearchMetrics`, `names_holdout` | 2026-11-04 | A neutral name such as `q4_auc` passes |
-| A reported gap and interval match the metrics | `_gap_matches_metrics`, `_interval_declares_bootstrap_count` | 2026-11-04 | Only when reported |
-| Models reject unknown fields | `rules/pydantic-extra-forbid.yml` | 2026-11-04 | Lint |
-| CLI above domain above I/O, and the engine never imports demos | `engine-layers`, `engine-independent-of-demos` | 2026-11-04 | Imports only |
-| Engine code passes strict types, and has no dead code | `[tool.basedpyright]`, `scripts/dead_code.py` | 2026-11-04 | Vulture counts every Pydantic field as used |
+| No agent SDK or spawned process | `pyproject.toml::tool.ruff.lint.flake8-tidy-imports.banned-api.subprocess`, `rules/no-agent-runtime.yml::no-agent-runtime` | 2026-11-04 | `getattr(os, ...)` passes |
+| Pulls are read-only, with no override | `src/model_finder/sources/query.py::require_read_only_query`, `src/model_finder/sources/manifest.py::verify_snapshot` | 2026-06-07 | Defence in depth: the warehouse role is the real guard |
+| The agent does not read the holdout store | `src/model_finder/cli/agent_rules.py::HOLDOUT_DENY_RULES`, `src/model_finder/cli/setup.py::_write_deny_rules`, `src/model_finder/cli/guard.py::refusal` | 2026-11-04 | Deny rules for Claude Code, the guard hook for Codex and Cursor. Both match names, so a path a script builds passes |
+| A consumer's declared claude.ai connector writes are denied | `src/model_finder/cli/agent_rules.py::connector_rules`, `src/model_finder/cli/guard.py::refusal` | 2026-11-06 | A tool the declaration omits stays allowed |
+| Candidates receive no holdout rows, and predict never receives the target | `src/model_finder/splits.py::SearchSplits`, `src/model_finder/candidates.py::scored_candidate`, `pyproject.toml::tool.importlinter.contracts.demos-cannot-reach-holdout-store` | 2026-11-04 | A script can still read the store, and a hand-built `FittedCandidate` scores its own rows |
+| A holdout read needs a reason after the first | `src/model_finder/ledger.py::claim_for_evaluation`, `src/model_finder/holdout.py::withdraw_selection` | 2026-11-04 | An edited ledger passes, and a new resplit is a new file |
+| Edited evidence cannot complete | `src/model_finder/final_evaluation.py::load_verified_final`, `src/model_finder/final_evaluation.py::_require_ledger_chain` | 2026-11-04 | An edited ledger passes |
+| A holdout score cannot enter search metrics by name | `src/model_finder/candidate_result.py::SearchMetrics`, `src/model_finder/candidate_result.py::names_holdout` | 2026-11-04 | A neutral name such as `q4_auc` passes |
+| A reported gap and interval match the metrics | `src/model_finder/candidate_result.py::_gap_matches_metrics`, `src/model_finder/candidate_result.py::_interval_declares_bootstrap_count` | 2026-11-04 | Only when reported |
+| Models reject unknown fields | `rules/pydantic-extra-forbid.yml::pydantic-extra-forbid` | 2026-11-04 | Lint |
+| CLI above domain above I/O, and the engine never imports demos | `pyproject.toml::tool.importlinter.contracts.engine-layers`, `pyproject.toml::tool.importlinter.contracts.engine-independent-of-demos` | 2026-11-04 | Imports only |
+| Engine code passes strict types, and has no dead code | `pyproject.toml::tool.basedpyright.strict`, `Makefile::dead` | 2026-11-04 | Vulture counts every Pydantic field as used |

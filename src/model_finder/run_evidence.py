@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import importlib.metadata
 import json
@@ -81,11 +82,14 @@ def _sources_sha256(roots: list[Path], config_files: list[Path]) -> str | None:
     return digest.hexdigest()
 
 
+@functools.cache
 def _dependencies_sha256() -> str:
     """Hash installed names and versions in site-packages only.
 
     ``python -m`` puts the working directory on ``sys.path``, so a stray egg-info there must not
     count. This identifies versions. An edit to an installed package's source goes unseen.
+    Parsing every package's metadata takes about 0.5s, and one command does not change what is
+    installed, so the hash is computed once per process.
     """
     installed = sorted(
         {

@@ -152,3 +152,19 @@ def test_next_needs_no_experiment_and_never_fails(tmp_path: Path, monkeypatch, c
     monkeypatch.chdir(tmp_path)
     assert main(["next"]) == 0
     assert "experiment new my_run --csv rows.csv" in capsys.readouterr().out
+
+
+def test_a_syntax_error_in_candidates_names_the_line(consumer: Path, capsys) -> None:
+    assert main(["new", "churn", "--csv", "rows.csv"]) == 0
+    path = Path("experiments/churn/model/candidates.py")
+    path.write_text(path.read_text() + "\ndef broken(:\n")
+    done = subprocess.run(
+        [sys.executable, "experiments/churn/model/run.py", "list-candidates"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 1
+    assert "candidates.py:" in done.stderr
+    assert "SyntaxError" in done.stderr
+    assert "Traceback" not in done.stderr

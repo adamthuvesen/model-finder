@@ -40,6 +40,9 @@ def _tool_commands(files: list[str]) -> list[list[str]]:
 
 
 def main(arguments: list[str]) -> int:
+    if not (BIN / "ruff").is_file():
+        print(f"quick: {BIN / 'ruff'} is missing. Fix: run make setup", file=sys.stderr)
+        return 1
     files = arguments or _changed_python_files()
     if not files:
         print("quick: no changed Python files")

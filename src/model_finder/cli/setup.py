@@ -3,104 +3,53 @@
 from __future__ import annotations
 
 import json
-import re
-import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, cast
+from typing import cast
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
-
+from model_finder.cli.agent_rules import (
+    CONNECTOR_RULE_PREFIX,
+    EARLIER_DENY_RULE,
+    HOLDOUT_DENY_RULES,
+    connector_rules,
+)
 from model_finder.io import read_text, write_json
 
 PACKAGED_SKILLS = Path(__file__).parents[1] / "skills"
 SKILLS_DIR = (".agents", "skills")
 
 
-# No machine path, so setup writes the same bytes everywhere and any data home is covered.
-HOLDOUT_DENY_RULES = (
-    "Read(//**/model-finder/holdouts/**)",
-    "Edit(//**/model-finder/holdouts/**)",
-    "Bash(*model-finder/holdouts*)",
-)
-# The forms earlier versions wrote, which named one machine's store. Setup replaces them.
-EARLIER_DENY_RULE = re.compile(r"(Read|Edit)\((//|~/).*model-finder/holdouts/\*\*\)")
-# A repo that declares its connectors hands every rule with this prefix to setup.
-CONNECTOR_RULE_PREFIX = "mcp__claude_ai_"
-
-
-class Connector(BaseModel):
-    """A claude.ai connector, and the tools of it that write. Setup denies each of them."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: Annotated[str, Field(pattern=r"^[A-Za-z0-9_]+$")]
-    write_tools: Annotated[
-        list[Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]+$")]], Field(min_length=1)
-    ]
-
-
-class ToolSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    connectors: list[Connector]
-
-
-def _connector_rules(repo_root: Path) -> list[str] | None:
-    """The deny rules for `[[tool.model-finder.connectors]]`. None when the repo declares none."""
-    path = repo_root / "pyproject.toml"
-    if not path.exists():
-        return None
-    try:
-        tool = cast("dict[str, object]", tomllib.loads(read_text(path)).get("tool", {}))
-    except tomllib.TOMLDecodeError as exc:
-        raise ValueError(f"{path}: {exc}. Fix: repair the TOML, then run setup") from exc
-    if "model-finder" not in tool:
-        return None
-    try:
-        settings = ToolSettings.model_validate(tool["model-finder"])
-    except ValidationError as exc:
-        problem = exc.errors()[0]
-        where = ".".join(str(part) for part in problem["loc"])
-        raise ValueError(
-            f"{path}: [tool.model-finder] {where}: {problem['msg']}. Fix: give each "
-            "[[tool.model-finder.connectors]] a name and a list of write_tools"
-        ) from exc
-    rules = (
-        f"{CONNECTOR_RULE_PREFIX}{connector.name}__{write_tool}"
-        for connector in settings.connectors
-        for write_tool in connector.write_tools
-    )
-    return list(dict.fromkeys(rules))
-
-
 HOOK_SCRIPT = "post_edit.sh"
+GUARD_MODULE = "model_finder.cli.guard"
+_TOP = "$(git rev-parse --show-toplevel)"
 
 
-def _hook_command(client: str) -> str:
-    return f'sh "$(git rev-parse --show-toplevel)/.agents/hooks/{HOOK_SCRIPT}" {client}'
+def _hook_command(owner: str, client: str) -> str:
+    if owner == GUARD_MODULE:
+        return f'"{_TOP}/.venv/bin/python" -m {GUARD_MODULE} {client} "{_TOP}"'
+    return f'sh "{_TOP}/.agents/hooks/{HOOK_SCRIPT}" {client}'
 
 
 @dataclass(frozen=True)
 class HookClient:
-    """One client's documented hook format. Every hook comes from this table."""
+    """One hook in one client's documented format. Every hook comes from these tables."""
 
     name: str
     config_path: str
     event: str
-    matcher: str
+    matcher: str | None
     nested: bool = True
     fields: Mapping[str, object] = field(default_factory=dict[str, object])
+    owner: str = HOOK_SCRIPT
+    options: Mapping[str, object] = field(default_factory=dict[str, object])
 
     def entry(self) -> dict[str, object]:
-        command = _hook_command(self.name)
+        command = {"command": _hook_command(self.owner, self.name), **self.options}
+        matcher = {} if self.matcher is None else {"matcher": self.matcher}
         if self.nested:
-            return {
-                "matcher": self.matcher,
-                "hooks": [{"type": "command", "command": command}],
-            }
-        return {"matcher": self.matcher, "command": command}
+            return {**matcher, "hooks": [{"type": "command", **command}]}
+        return {**matcher, **command}
 
 
 # Each shape follows the client's published docs. None was run against a live client.
@@ -110,6 +59,33 @@ HOOK_CLIENTS = (
     HookClient("codex", ".codex/hooks.json", "PostToolUse", "Edit|Write"),
     HookClient(
         "cursor", ".cursor/hooks.json", "postToolUse", "Write", nested=False, fields={"version": 1}
+    ),
+)
+# Codex and Cursor have no deny rules, so a pre-tool guard enforces the same limits. Codex reads
+# files through the shell. A guard that cannot run blocks the call: Cursor fails closed.
+_GUARD_OPTIONS = {"timeout": 10}
+_CURSOR_GUARD = {"timeout": 10, "failClosed": True}
+GUARD_HOOKS = (
+    HookClient(
+        "codex",
+        ".codex/hooks.json",
+        "PreToolUse",
+        "Bash|apply_patch|mcp__.*",
+        owner=GUARD_MODULE,
+        options=_GUARD_OPTIONS,
+    ),
+    *(
+        HookClient(
+            "cursor",
+            ".cursor/hooks.json",
+            event,
+            None,
+            nested=False,
+            fields={"version": 1},
+            owner=GUARD_MODULE,
+            options=_CURSOR_GUARD,
+        )
+        for event in ("beforeShellExecution", "beforeReadFile", "beforeMCPExecution")
     ),
 )
 
@@ -156,7 +132,7 @@ def _member(parent: object, key: str, default: object) -> object:
 
 def _write_deny_rules(repo_root: Path) -> list[str]:
     """Write the holdout and connector deny rules. Every other setting stays as it is."""
-    connector_rules = _connector_rules(repo_root)
+    declared_rules = connector_rules(repo_root)
     path = repo_root / ".claude" / "settings.json"
     try:
         settings: object = json.loads(read_text(path)) if path.exists() else {}
@@ -181,12 +157,12 @@ def _write_deny_rules(repo_root: Path) -> list[str]:
         rule
         for rule in rules
         if (rule in HOLDOUT_DENY_RULES or not EARLIER_DENY_RULE.fullmatch(rule))
-        and (connector_rules is None or not rule.startswith(CONNECTOR_RULE_PREFIX))
+        and (declared_rules is None or not rule.startswith(CONNECTOR_RULE_PREFIX))
     ]
     merged = [
         *kept,
         *(rule for rule in HOLDOUT_DENY_RULES if rule not in kept),
-        *(connector_rules or []),
+        *(declared_rules or []),
     ]
     if merged == rules:
         return []
@@ -221,19 +197,23 @@ def _install_hook(repo_root: Path, client: HookClient) -> list[str]:
             f"{path}: hooks.{client.event} must be a list. Fix: repair it, then run setup"
         )
     others = [
-        entry for entry in cast("list[object]", entries) if HOOK_SCRIPT not in json.dumps(entry)
+        entry for entry in cast("list[object]", entries) if client.owner not in json.dumps(entry)
     ]
     entries[:] = [*others, client.entry()]
     if json.dumps(settings) == before:
         return []
     write_json(path, settings)
-    return [f"wrote the post-edit hook to {client.config_path}"]
+    kind = "guard" if client.owner == GUARD_MODULE else "post-edit"
+    return [f"wrote the {kind} hook for {client.event} to {client.config_path}"]
 
 
 def _link_hook_script(repo_root: Path) -> list[str]:
     link = repo_root / ".agents" / "hooks" / HOOK_SCRIPT
     source = (Path(__file__).parents[1] / "hooks" / HOOK_SCRIPT).resolve()
     if link.is_symlink() and link.resolve() == source:
+        return []
+    # A repo's own script that runs the packaged hook, so the hook also answers in a fresh clone.
+    if link.is_file() and f"model_finder/hooks/{HOOK_SCRIPT}" in read_text(link.resolve()):
         return []
     link.parent.mkdir(parents=True, exist_ok=True)
     link.unlink(missing_ok=True)
@@ -248,6 +228,6 @@ def setup_repo(repo_root: Path) -> list[str]:
         *_link_claude_skills(repo_root),
         *_link_hook_script(repo_root),
     ]
-    for client in HOOK_CLIENTS:
+    for client in (*HOOK_CLIENTS, *GUARD_HOOKS):
         actions.extend(_install_hook(repo_root, client))
     return actions

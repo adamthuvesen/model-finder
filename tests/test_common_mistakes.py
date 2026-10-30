@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import shlex
 import subprocess
@@ -274,22 +275,6 @@ def test_an_engine_bug_keeps_its_traceback() -> None:
         run_reporting_errors(command)
 
 
-def test_a_syntax_error_in_candidates_names_the_line(consumer: Path, capsys) -> None:
-    assert main(["new", "churn", "--csv", "rows.csv"]) == 0
-    path = Path("experiments/churn/model/candidates.py")
-    path.write_text(path.read_text() + "\ndef broken(:\n")
-    done = subprocess.run(
-        [sys.executable, "experiments/churn/model/run.py", "list-candidates"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert done.returncode == 1
-    assert "candidates.py:" in done.stderr
-    assert "SyntaxError" in done.stderr
-    assert "Traceback" not in done.stderr
-
-
 def test_a_duplicate_candidate_names_both_locations(tmp_path: Path) -> None:
     body = HEADER + (
         "@candidates.add\ndef same(splits):\n    return None\n\n"
@@ -402,20 +387,18 @@ def test_files_outside_the_repo_are_not_reported(tmp_path: Path) -> None:
     assert edited_files(inside, root) == [str((root / "a.py").resolve())]
 
 
-def test_quick_handles_spaces_in_file_names(tmp_path: Path) -> None:
+def test_quick_handles_spaces_in_file_names(tmp_path: Path, monkeypatch) -> None:
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     (tmp_path / "with space.py").write_text("VALUE = 1\n")
-    (tmp_path / ".venv").symlink_to(Path(sys.executable).parents[1])
-    (tmp_path / "pyproject.toml").write_text("")
-    done = subprocess.run(
-        [sys.executable, str(ROOT / "scripts/quick.py")],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert "E902" not in done.stdout + done.stderr
-    assert done.returncode == 0, done.stdout + done.stderr
+    monkeypatch.chdir(tmp_path)
+    spec = importlib.util.spec_from_file_location("quick", ROOT / "scripts/quick.py")
+    assert spec is not None
+    assert spec.loader is not None
+    quick = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(quick)
+    files = quick._changed_python_files()
+    assert files == ["with space.py"]
+    assert all(files == command[-len(files) :] for command in quick._tool_commands(files))
 
 
 def test_a_holdout_metric_names_the_scoring_function_once(capsys) -> None:
