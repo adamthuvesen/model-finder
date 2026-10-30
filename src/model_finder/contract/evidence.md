@@ -56,9 +56,6 @@ Order of writes, so that a crash cannot hide a read:
 - `experiment reseal`: `retired` entry, history, new sealed file, seal record. A retry resumes. A retry after the
   commit finds its rows live and does nothing.
 
-A store from the engine's old name, `agentic-ml-loop`, stays usable. Its ledger still counts, its path stays denied, and a
-holdout left there fails with the exact `mv` to run. The engine does not move it on its own.
-
 A corrupt ledger fails closed, because it could hide an earlier read. The error names the file and the line.
 
 ## Limits

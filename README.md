@@ -67,6 +67,15 @@ uv add --editable ../model-finder
 uv run experiment setup                      # links skills, adds the holdout deny rule and the agent hooks
 ```
 
+To deny claude.ai connector writes, declare each connector in your `pyproject.toml`. Setup then owns every
+`mcp__claude_ai_*` deny rule, and drops one that no declaration names:
+
+```toml
+[[tool.model-finder.connectors]]
+name = "Slack"
+write_tools = ["slack_send_message", "slack_create_canvas"]
+```
+
 Your candidates, loaders, and metrics live in your own modules: `RunnerConfig`, `Candidates`, and `Scoring(..., evaluate=...)`
 take them with no engine change.
 
@@ -116,5 +125,6 @@ to end. The other connectors are tested against mocked clients.
 ```bash
 uv sync --extra models --extra deep
 make quick    # only changed Python files, no tests
-make check    # the gate: lock, ruff, strict types, import contracts, ast-grep, deptry, vulture, tests
+make fast     # lock, ruff, strict types, import contracts, ast-grep, deptry, vulture, fast tests
+make check    # the gate: fast, then the slow tests and coverage
 ```

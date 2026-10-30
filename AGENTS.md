@@ -11,7 +11,7 @@ run records, and a completion check. Docs: [architecture](.agents/docs/architect
 | --- | --- |
 | New experiment on a CSV | `experiment new <slug> --csv <file>` |
 | New candidate | One function in `experiments/<slug>/model/candidates.py`: `experiment candidate new <name>` |
-| New result field | Optional: one line in `CandidateResult`, plus `ignore_names` for vulture if nothing reads it. Required: also `scored_candidate` and `result_fields()` in `tests/conftest.py`. That is 4 edits when the value is at hand. With no value at hand, it also needs a source, such as a field on `Scoring` |
+| New result field | One optional field in `CandidateResult`. A required field also needs a value in `scored_candidate` and in `result_fields()` in `tests/conftest.py` |
 | New source | `sources/bundles/<name>/source.json` and `SETUP.md`, an extra in `pyproject.toml`, and a `source_type` that is a sqlglot dialect. A non-ADBC driver also needs an adapter class. `experiment sources check` reports what is missing |
 | A label or an exploratory reason | `labels.py` |
 | Freeze and evaluate | `final_evaluation.py` |
@@ -21,13 +21,16 @@ run records, and a completion check. Docs: [architecture](.agents/docs/architect
 ## Commands
 
 ```bash
-make quick            # only changed Python files, no tests: 0.7s for one file, 2.7s for 49
-make check            # the gate; CI runs the same targets
+make quick            # only changed Python files, no tests: under 1s for one file
+make fast             # the fast lane, about 13s; the first CI job
+make verify           # slow tests in tests/verify, and coverage over the whole suite
+make check            # fast, then verify: the full offline gate
 uv run experiment next
 uv run experiment contract commands
 ```
 
-Prove user-facing changes with `.agents/skills/verify-model-finder/`. Build test results with `candidate_result()` or `result_fields()` in
+Put a test that starts a process or runs a demo in `tests/verify/`. Prove user-facing changes with
+`.agents/skills/verify-model-finder/`. Build test results with `candidate_result()` or `result_fields()` in
 `tests/conftest.py`. Every error message follows
 `<file>:<line>: <what is wrong>. Fix: <exact change or command>`.
 
@@ -56,17 +59,19 @@ result is exploratory. Never produce a holdout number with no label.
 ## Enforced rules
 
 Labels and warnings are in `experiment contract evidence`. This table lists only what code refuses.
+`tests/test_agents_table.py` fails when a name in backticks under "Enforced by" does not exist.
 
-| Rule | Enforced by | Strength |
-| --- | --- | --- |
-| No agent SDK or spawned process | Ruff `TID251`, `no-agent-runtime` rule and contract | Safety. Limit: `getattr(os, ...)` passes |
-| Pulls are read-only, with no override | `require_read_only_query`, `verify_snapshot` | Safety. Defence in depth: the warehouse role is the real guard |
-| The agent does not read the holdout store | Deny rule that `experiment setup` adds | Safety for Claude Code. Limit: a rule does not match every command form |
-| Candidates receive no holdout rows, and predict never receives the target | `SearchSplits` type, `scored_candidate`, `demos-cannot-reach-holdout-store` | Design. Limit: a script can still read the store, and a hand-built `FittedCandidate` scores its own rows |
-| A holdout read needs a reason after the first | Ledger, `claim_for_evaluation`, `withdraw_selection` | Hard unless the ledger is edited. Limit: a new resplit is a new file |
-| Edited evidence cannot complete | `load_verified_final`, `_require_ledger_chain`, search-row rehash | Hard unless the ledger is edited |
-| A holdout score cannot enter search metrics by name | `SearchMetrics`, `names_holdout` | Hard for split keys. Limit: a neutral name such as `q4_auc` passes |
-| A reported gap and interval match the metrics | `CandidateResult` validators | Hard when reported |
-| Models reject unknown fields | `pydantic-extra-forbid` | Lint |
-| CLI above domain above I/O, and the engine never imports demos | `engine-layers`, `engine-independent-of-demos` | Hard for imports |
-| Engine code passes strict types, and has no dead code | `make types`, `make dead` | Hard. Vulture has 4 known false positives in `ignore_names`, for names only generated code uses |
+| Rule | Enforced by | Added | Limit |
+| --- | --- | --- | --- |
+| No agent SDK or spawned process | Ruff `TID251` in `pyproject.toml`, `rules/no-agent-runtime.yml` | 2026-11-04 | `getattr(os, ...)` passes |
+| Pulls are read-only, with no override | `require_read_only_query`, `verify_snapshot` | 2026-06-07 | Defence in depth: the warehouse role is the real guard |
+| The agent does not read the holdout store | `HOLDOUT_DENY_RULES`, which `experiment setup` writes | 2026-11-04 | Claude Code only, and a rule does not match every command form |
+| A consumer's declared claude.ai connector writes are denied | `_connector_rules`, `CONNECTOR_RULE_PREFIX` | 2026-11-06 | Claude Code only. A tool the declaration omits stays allowed |
+| Candidates receive no holdout rows, and predict never receives the target | `SearchSplits`, `scored_candidate`, `demos-cannot-reach-holdout-store` | 2026-11-04 | A script can still read the store, and a hand-built `FittedCandidate` scores its own rows |
+| A holdout read needs a reason after the first | `claim_for_evaluation`, `withdraw_selection` | 2026-11-04 | An edited ledger passes, and a new resplit is a new file |
+| Edited evidence cannot complete | `load_verified_final`, `_require_ledger_chain` | 2026-11-04 | An edited ledger passes |
+| A holdout score cannot enter search metrics by name | `SearchMetrics`, `names_holdout` | 2026-11-04 | A neutral name such as `q4_auc` passes |
+| A reported gap and interval match the metrics | `_gap_matches_metrics`, `_interval_declares_bootstrap_count` | 2026-11-04 | Only when reported |
+| Models reject unknown fields | `rules/pydantic-extra-forbid.yml` | 2026-11-04 | Lint |
+| CLI above domain above I/O, and the engine never imports demos | `engine-layers`, `engine-independent-of-demos` | 2026-11-04 | Imports only |
+| Engine code passes strict types, and has no dead code | `[tool.basedpyright]`, `scripts/dead_code.py` | 2026-11-04 | Vulture counts every Pydantic field as used |

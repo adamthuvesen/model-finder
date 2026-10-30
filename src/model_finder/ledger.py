@@ -19,7 +19,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from model_finder.splits import Sha256
 
 _LEDGER_FILE_NAME = "ledger.jsonl"
-OLD_ENGINE_NAME = "agentic-ml-loop"
 ProvenanceNote = Annotated[str, Field(min_length=1, pattern=r"\S")]
 
 
@@ -47,11 +46,6 @@ def store_root() -> Path:
     return _data_home() / "model-finder" / "holdouts"
 
 
-def legacy_store_root() -> Path:
-    """Where this engine kept holdouts under its old name, agentic-ml-loop."""
-    return _data_home() / OLD_ENGINE_NAME / "holdouts"
-
-
 def _ledger_path() -> Path:
     root = store_root()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -73,15 +67,9 @@ def store_lock() -> AbstractContextManager[None]:
 
 
 def read_ledger() -> list[LedgerEntry]:
-    """Return every entry, from both stores, so a read recorded under the old name still counts.
-
-    An unreadable store or a corrupt line fails closed.
-    """
-    entries: list[LedgerEntry] = []
-    for path in (legacy_store_root() / _LEDGER_FILE_NAME, _ledger_path()):
-        if path.exists():
-            entries.extend(_read_ledger_file(path))
-    return entries
+    """Return every entry. An unreadable store or a corrupt line fails closed."""
+    path = _ledger_path()
+    return _read_ledger_file(path) if path.exists() else []
 
 
 def _read_ledger_file(path: Path) -> list[LedgerEntry]:

@@ -4,36 +4,75 @@ from __future__ import annotations
 
 import json
 import re
+import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import Annotated, cast
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from model_finder.io import read_text, write_json
 
 PACKAGED_SKILLS = Path(__file__).parents[1] / "skills"
 SKILLS_DIR = (".agents", "skills")
-OLD_ENGINE_NAMES = ("agentic-ml-loop",)
-OLD_PACKAGES = ("agentic_ml_loop",)
-
-
-def _deny_rules_for(name: str) -> tuple[str, str, str]:
-    return (
-        f"Read(//**/{name}/holdouts/**)",
-        f"Edit(//**/{name}/holdouts/**)",
-        f"Bash(*{name}/holdouts*)",
-    )
 
 
 # No machine path, so setup writes the same bytes everywhere and any data home is covered.
-# The old name stays denied, because a holdout can still sit in a store from that name.
-HOLDOUT_DENY_RULES = tuple(
-    rule for name in ("model-finder", *OLD_ENGINE_NAMES) for rule in _deny_rules_for(name)
+HOLDOUT_DENY_RULES = (
+    "Read(//**/model-finder/holdouts/**)",
+    "Edit(//**/model-finder/holdouts/**)",
+    "Bash(*model-finder/holdouts*)",
 )
 # The forms earlier versions wrote, which named one machine's store. Setup replaces them.
-EARLIER_DENY_RULE = re.compile(
-    r"(Read|Edit)\((//|~/).*(model-finder|agentic-ml-loop)/holdouts/\*\*\)"
-)
+EARLIER_DENY_RULE = re.compile(r"(Read|Edit)\((//|~/).*model-finder/holdouts/\*\*\)")
+# A repo that declares its connectors hands every rule with this prefix to setup.
+CONNECTOR_RULE_PREFIX = "mcp__claude_ai_"
+
+
+class Connector(BaseModel):
+    """A claude.ai connector, and the tools of it that write. Setup denies each of them."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: Annotated[str, Field(pattern=r"^[A-Za-z0-9_]+$")]
+    write_tools: Annotated[
+        list[Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]+$")]], Field(min_length=1)
+    ]
+
+
+class ToolSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    connectors: list[Connector]
+
+
+def _connector_rules(repo_root: Path) -> list[str] | None:
+    """The deny rules for `[[tool.model-finder.connectors]]`. None when the repo declares none."""
+    path = repo_root / "pyproject.toml"
+    if not path.exists():
+        return None
+    try:
+        tool = cast("dict[str, object]", tomllib.loads(read_text(path)).get("tool", {}))
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"{path}: {exc}. Fix: repair the TOML, then run setup") from exc
+    if "model-finder" not in tool:
+        return None
+    try:
+        settings = ToolSettings.model_validate(tool["model-finder"])
+    except ValidationError as exc:
+        problem = exc.errors()[0]
+        where = ".".join(str(part) for part in problem["loc"])
+        raise ValueError(
+            f"{path}: [tool.model-finder] {where}: {problem['msg']}. Fix: give each "
+            "[[tool.model-finder.connectors]] a name and a list of write_tools"
+        ) from exc
+    rules = (
+        f"{CONNECTOR_RULE_PREFIX}{connector.name}__{write_tool}"
+        for connector in settings.connectors
+        for write_tool in connector.write_tools
+    )
+    return list(dict.fromkeys(rules))
 
 
 HOOK_SCRIPT = "post_edit.sh"
@@ -77,11 +116,7 @@ HOOK_CLIENTS = (
 
 def _is_engine_link(link: Path) -> bool:
     """Recognize a link to an older install of this package, such as a rebuilt venv."""
-    target = link.readlink().as_posix()
-    return any(
-        target.endswith(f"{package}/skills/{link.name}")
-        for package in ("model_finder", *OLD_PACKAGES)
-    )
+    return link.readlink().as_posix().endswith(f"model_finder/skills/{link.name}")
 
 
 def _link_skills(repo_root: Path) -> list[str]:
@@ -119,8 +154,9 @@ def _member(parent: object, key: str, default: object) -> object:
     return cast("dict[str, object]", parent).setdefault(key, default)
 
 
-def _deny_holdout_store(repo_root: Path) -> list[str]:
-    """Add the deny rules to `.claude/settings.json`. Every other setting stays as it is."""
+def _write_deny_rules(repo_root: Path) -> list[str]:
+    """Write the holdout and connector deny rules. Every other setting stays as it is."""
+    connector_rules = _connector_rules(repo_root)
     path = repo_root / ".claude" / "settings.json"
     try:
         settings: object = json.loads(read_text(path)) if path.exists() else {}
@@ -144,14 +180,19 @@ def _deny_holdout_store(repo_root: Path) -> list[str]:
     kept = [
         rule
         for rule in rules
-        if rule in HOLDOUT_DENY_RULES or not EARLIER_DENY_RULE.fullmatch(rule)
+        if (rule in HOLDOUT_DENY_RULES or not EARLIER_DENY_RULE.fullmatch(rule))
+        and (connector_rules is None or not rule.startswith(CONNECTOR_RULE_PREFIX))
     ]
-    merged = kept + [rule for rule in HOLDOUT_DENY_RULES if rule not in kept]
+    merged = [
+        *kept,
+        *(rule for rule in HOLDOUT_DENY_RULES if rule not in kept),
+        *(connector_rules or []),
+    ]
     if merged == rules:
         return []
     rules[:] = merged
     write_json(path, settings)
-    return ["wrote holdout deny rules to .claude/settings.json"]
+    return ["wrote holdout and connector deny rules to .claude/settings.json"]
 
 
 def _load_settings(path: Path) -> dict[str, object]:
@@ -202,7 +243,7 @@ def _link_hook_script(repo_root: Path) -> list[str]:
 
 def setup_repo(repo_root: Path) -> list[str]:
     actions = [
-        *_deny_holdout_store(repo_root),
+        *_write_deny_rules(repo_root),
         *_link_skills(repo_root),
         *_link_claude_skills(repo_root),
         *_link_hook_script(repo_root),

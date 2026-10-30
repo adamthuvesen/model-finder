@@ -15,7 +15,7 @@ from model_finder.cli.hook import edited_files, experiment_of, report
 from model_finder.cli.main import main
 from model_finder.cli.setup import HOOK_CLIENTS
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).parents[2]
 SCRIPT = ROOT / "src/model_finder/hooks/post_edit.sh"
 
 

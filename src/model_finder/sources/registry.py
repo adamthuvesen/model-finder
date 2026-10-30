@@ -22,7 +22,6 @@ _REQUIRED_FIELDS = ("source_type", "display_name", "extra", "package", "driver",
 # Sources with their own adapter class in adapters.py. All others use ADBC through adbc_module.
 NATIVE_ADAPTERS = frozenset({"databricks", "redshift", "duckdb"})
 _CONFIG_PATH = Path.home() / ".config" / "model-finder" / "sources.json"
-_OLD_CONFIG_PATH = Path.home() / ".config" / "agentic-ml-loop" / "sources.json"
 
 
 class _EnabledSources(BaseModel):
@@ -134,12 +133,9 @@ def get_bundle(source_type: str) -> Bundle:
 
 
 def enabled_sources() -> set[str]:
-    """Read enabled sources, and keep what a person enabled under the engine's old name."""
-    enabled: set[str] = set()
-    for path in (_OLD_CONFIG_PATH, _CONFIG_PATH):
-        if path.exists():
-            enabled |= set(_EnabledSources.model_validate(load_json(path)).enabled)
-    return enabled
+    if not _CONFIG_PATH.exists():
+        return set()
+    return set(_EnabledSources.model_validate(load_json(_CONFIG_PATH)).enabled)
 
 
 def is_enabled(source_type: str) -> bool:

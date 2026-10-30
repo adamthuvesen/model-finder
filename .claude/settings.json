@@ -5,10 +5,7 @@
       "Edit(~/.local/share/model-finder/**)",
       "Bash(*model-finder/holdouts*)",
       "Read(//**/model-finder/holdouts/**)",
-      "Edit(//**/model-finder/holdouts/**)",
-      "Read(//**/agentic-ml-loop/holdouts/**)",
-      "Edit(//**/agentic-ml-loop/holdouts/**)",
-      "Bash(*agentic-ml-loop/holdouts*)"
+      "Edit(//**/model-finder/holdouts/**)"
     ]
   },
   "hooks": {

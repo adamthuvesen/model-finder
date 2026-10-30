@@ -13,7 +13,7 @@ Drive in the table's order. The drives share one experiment, `run_a`. Start agai
 `.venv/bin/experiment --help` and `.venv/bin/python -m demos.demo_bootstrap --help`. Each subcommand
 name is an `Inventory-id`, prefixed `experiment:` or `runner:`.
 
-Unmapped: `experiment:new`, `experiment:candidate`, and `experiment:next` (`tests/test_scaffold.py`), `experiment:rebuild-results` (`tests/test_cli.py`), `experiment:seal` and `experiment:pull` (need a warehouse snapshot, tested with DuckDB in
+Unmapped: `experiment:new`, `experiment:candidate`, and `experiment:next` (`tests/verify/test_scaffold.py`), `experiment:rebuild-results` (`tests/test_cli.py`), `experiment:seal` and `experiment:pull` (need a warehouse snapshot, tested with DuckDB in
 `tests/test_sources.py`), `experiment:sources`,
 `runner:list-candidates` (read-only listings).
 

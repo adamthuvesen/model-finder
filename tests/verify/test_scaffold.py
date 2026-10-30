@@ -16,7 +16,7 @@ from model_finder.cli.next_step import next_steps
 from model_finder.cli.runner import run_runner_main
 from model_finder.cli.scaffold import load_runner
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).parents[2]
 
 
 def _csv(path: Path, *, binary: bool = True, columns: tuple[str, str] = ("date", "label")) -> Path:

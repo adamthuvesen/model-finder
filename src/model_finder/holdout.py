@@ -16,7 +16,6 @@ from model_finder.io import file_sha256, read_text, utc_now, write_json
 from model_finder.ledger import (
     LedgerEntry,
     entries_for,
-    legacy_store_root,
     record_reopened,
     retired_count,
     store_lock,
@@ -235,13 +234,6 @@ def verify_sealed_holdout(seal: HoldoutSeal) -> None:
     """Compare file bytes to the seal without parsing a row."""
     path = sealed_file_path(seal)
     if not path.is_file():
-        old_path = legacy_store_root() / seal.experiment_uid / path.name
-        if old_path.is_file():
-            raise FileNotFoundError(
-                f"{old_path}: this holdout is in the store from the engine's old name, and "
-                f"{path} does not hold it. The engine does not move holdouts on its own. "
-                f'Fix: run `mkdir -p "{path.parent}" && mv "{old_path}" "{path}"`'
-            )
         raise FileNotFoundError(
             f"{path}: Sealed holdout is missing from the store. "
             "Fix: restore the file, or seal new rows with `experiment reseal`"

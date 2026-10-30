@@ -299,9 +299,6 @@ DENY_RULES = [
     "Read(//**/model-finder/holdouts/**)",
     "Edit(//**/model-finder/holdouts/**)",
     "Bash(*model-finder/holdouts*)",
-    "Read(//**/agentic-ml-loop/holdouts/**)",
-    "Edit(//**/agentic-ml-loop/holdouts/**)",
-    "Bash(*agentic-ml-loop/holdouts*)",
 ]
 
 
@@ -393,6 +390,62 @@ def test_setup_replaces_rules_from_an_earlier_version_and_keeps_user_rules(tmp_p
     settings.write_text(json.dumps({"permissions": {"deny": [*user_rules, *earlier]}}))
     assert main(["setup", "--repo", str(repo)]) == 0
     assert _deny_rules(repo) == [*user_rules, *DENY_RULES]
+
+
+CONNECTORS_TOML = """
+[[tool.model-finder.connectors]]
+name = "Slack"
+write_tools = ["slack_send_message", "slack_create_canvas"]
+
+[[tool.model-finder.connectors]]
+name = "Notion"
+write_tools = ["notion-create-pages"]
+"""
+CONNECTOR_RULES = [
+    "mcp__claude_ai_Slack__slack_send_message",
+    "mcp__claude_ai_Slack__slack_create_canvas",
+    "mcp__claude_ai_Notion__notion-create-pages",
+]
+
+
+def _repo_with(tmp_path: Path, pyproject: str, deny: list[str]) -> Path:
+    repo = tmp_path / "repo"
+    (repo / ".claude").mkdir(parents=True)
+    (repo / "pyproject.toml").write_text(pyproject)
+    (repo / ".claude/settings.json").write_text(json.dumps({"permissions": {"deny": deny}}))
+    return repo
+
+
+@pytest.mark.parametrize(
+    "drift",
+    [
+        [],
+        CONNECTOR_RULES[:2],
+        [*CONNECTOR_RULES, "mcp__claude_ai_Slack__slack_read_channel"],
+    ],
+    ids=["missing", "one-removed", "hand-added"],
+)
+def test_setup_owns_declared_connector_denies(tmp_path: Path, drift: list[str]) -> None:
+    repo = _repo_with(tmp_path, CONNECTORS_TOML, ["Read(./.env)", *DENY_RULES, *drift])
+    assert main(["setup", "--repo", str(repo)]) == 0
+    assert _deny_rules(repo) == ["Read(./.env)", *DENY_RULES, *CONNECTOR_RULES]
+
+
+def test_setup_keeps_connector_rules_a_repo_has_not_declared(tmp_path: Path) -> None:
+    hand_kept = ["mcp__claude_ai_Slack__slack_send_message"]
+    repo = _repo_with(tmp_path, "[project]\nname = 'x'\n", hand_kept)
+    assert main(["setup", "--repo", str(repo)]) == 0
+    assert _deny_rules(repo) == [*hand_kept, *DENY_RULES]
+
+
+def test_setup_refuses_a_connector_with_no_write_tools(tmp_path: Path, capsys) -> None:
+    pyproject = '[[tool.model-finder.connectors]]\nname = "Slack"\nwrite_tools = []\n'
+    repo = _repo_with(tmp_path, pyproject, [])
+    assert main(["setup", "--repo", str(repo)]) == 1
+    err = capsys.readouterr().err
+    assert "connectors.0.write_tools" in err
+    assert "Fix:" in err
+    assert _deny_rules(repo) == []
 
 
 _TWO_RUNNERS = {
