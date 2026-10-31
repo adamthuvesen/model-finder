@@ -346,6 +346,11 @@ def drive_new(ctx: Ctx) -> str:
     return "experiment new on a CSV seals 40 rows; a scaffolded candidate runs; the leaderboard shows 3"
 
 
+# The control passes only when the missing-experiment check fails with the CLI's own refusal.
+CONTROL_FAILURE = "missing-experiment: expected exit 0 and 'does not exist', got exit 1: "
+CONTROL_REFUSAL = "/absent: experiment directory does not exist."
+
+
 def check_missing_experiment(ctx: Ctx, code: int = 1) -> None:
     ctx.expect(
         "missing-experiment",
@@ -396,6 +401,11 @@ def drive_wheel(ctx: Ctx) -> str:
         env=real,
     )
     wheel = str(next(dist.glob("*.whl")))
+    # Dependencies come from the project's locked environment, not from whatever the
+    # shared uv cache holds; a plain path in a .pth adds it without its editable finder.
+    consumer_site = next((consumer / ".venv/lib").glob("python*/site-packages"))
+    locked_site = next((ROOT / ".venv/lib").glob("python*/site-packages"))
+    (consumer_site / "locked-dependencies.pth").write_text(f"{locked_site}\n")
     ctx.expect(
         "install",
         [
@@ -403,6 +413,7 @@ def drive_wheel(ctx: Ctx) -> str:
             "pip",
             "install",
             "--offline",
+            "--no-deps",
             "--quiet",
             "--python",
             str(consumer / ".venv/bin/python"),

@@ -37,7 +37,7 @@ from model_finder.sources import (
 from model_finder.sources.adapters import (
     DatabricksExtractor,
     RedshiftExtractor,
-    _to_adbc_db_kwargs,  # pyright: ignore[reportPrivateUsage]
+    _to_adbc_db_kwargs,
 )
 from model_finder.sources.errors import SourceError
 from model_finder.sources.query import require_read_only_query

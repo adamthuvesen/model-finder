@@ -80,3 +80,4 @@ Cite each check as `path::name`. `tests/test_agents_table.py` fails unless that 
 | CLI above domain above I/O, and the engine never imports demos | `pyproject.toml::tool.importlinter.contracts.engine-layers`, `pyproject.toml::tool.importlinter.contracts.engine-independent-of-demos` | 2026-11-04 | Imports only |
 | Code passes strict types, and the engine has no dead code | `pyproject.toml::tool.basedpyright.typeCheckingMode`, `Makefile::dead` | 2026-11-04 | Vulture counts every Pydantic field as used. basedpyright has no baseline file, so every type error fails `make types` |
 | A verify pass needs a control that observes FAIL | `.agents/skills/verify-model-finder/verify::run_control` | 2026-11-06 | One drive's exit-code check |
+| No file downgrades strict type checking with a `# pyright:` mode comment | `tests/test_strict_mode.py::test_no_file_downgrades_type_checking_mode` | 2026-11-07 | None |

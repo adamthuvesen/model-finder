@@ -1,4 +1,4 @@
 {
   "extends": "../../../pyproject.toml",
-  "include": ["."]
+  "include": [".", "verify"]
 }

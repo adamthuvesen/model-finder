@@ -19,6 +19,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from drives import (
     BIN,
+    CONTROL_FAILURE,
+    CONTROL_REFUSAL,
     DRIVES,
     LIVE,
     ROOT,
@@ -132,11 +134,19 @@ def run_control(run_dir: Path, scratch_root: Path) -> dict[str, object]:
     try:
         check_missing_experiment(ctx, code=0)
     except DriveFailure as failure:
+        message = str(failure)
+        if message.startswith(CONTROL_FAILURE) and CONTROL_REFUSAL in message:
+            return {
+                "drive": "control",
+                "result": "PASS",
+                "seconds": 0,
+                "detail": f"FAIL observed as expected: {message}",
+            }
         return {
             "drive": "control",
-            "result": "PASS",
+            "result": "FAIL",
             "seconds": 0,
-            "detail": f"FAIL observed as expected: {failure}",
+            "detail": f"failed for another reason; expected {CONTROL_FAILURE!r}: {message}",
         }
     return {
         "drive": "control",
