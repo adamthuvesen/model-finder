@@ -31,8 +31,8 @@ verify:
 
 # Every auto-fixer: lint fixes, then the formatter.
 fix:
-	$(RUN) ruff check . --fix
-	$(RUN) ruff format .
+	$(RUN) ruff check . .agents/skills/verify-model-finder/verify --fix
+	$(RUN) ruff format . .agents/skills/verify-model-finder/verify
 
 # Needs the network for the vulnerability database.
 audit: workflows secrets vulnerabilities
@@ -41,8 +41,8 @@ lock:
 	uv lock --check
 
 lint:
-	$(RUN) ruff check .
-	$(RUN) ruff format --check .
+	$(RUN) ruff check . .agents/skills/verify-model-finder/verify
+	$(RUN) ruff format --check . .agents/skills/verify-model-finder/verify
 
 types:
 	$(RUN) basedpyright --level error
