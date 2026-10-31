@@ -373,8 +373,13 @@ def drive_replay(ctx: Ctx) -> str:
 
 
 def drive_wheel(ctx: Ctx) -> str:
-    consumer, dist = ctx.scratch / "consumer", ctx.scratch / "dist"
+    consumer, dist, source = ctx.scratch / "consumer", ctx.scratch / "dist", ctx.scratch / "source"
     consumer.mkdir()
+    # setuptools writes build/ and an egg-info next to the project, so build from a copy.
+    for name in git("ls-files", "--cached", "--others", "--exclude-standard").splitlines():
+        if (ROOT / name).is_file():
+            (source / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / name, source / name)
     # uv keeps its managed Python and cache under the real HOME, so uv runs with the real environment, offline.
     real = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "VIRTUAL_ENV"))}
     ctx.expect(
@@ -382,7 +387,7 @@ def drive_wheel(ctx: Ctx) -> str:
         ["uv", "build", "--offline", "--wheel", "--quiet", "--out-dir", str(dist)],
         0,
         "",
-        ROOT,
+        source,
         env=real,
     )
     ctx.expect(

@@ -31,3 +31,9 @@ def test_instruction_text_stays_under_the_limit() -> None:
         f"instruction text is {lines} lines, over {LIMIT}. "
         "Fix: generate it from code, or point at `experiment contract` and `experiment next`."
     )
+
+
+def test_the_count_sees_known_instruction_files() -> None:
+    """A count over no files passes. Prove it still reads the root and a shipped skill."""
+    found = {str(path.relative_to(ROOT)) for path in _instruction_files()}
+    assert {"AGENTS.md", "src/model_finder/skills/research/SKILL.md"} <= found

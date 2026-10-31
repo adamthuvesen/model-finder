@@ -60,3 +60,15 @@ def test_every_rule_cites_a_defined_check() -> None:
         f"AGENTS.md: {'; '.join(problems)}. Fix: cite each check as `path::name`, where that "
         "file defines the name"
     )
+
+
+def test_the_citation_scan_finds_known_names() -> None:
+    """A scan that finds nothing passes. Prove it still tells a defined name from a near miss."""
+    assert _defines(ROOT / "Makefile", "check")
+    assert not _defines(ROOT / "Makefile", "chec")
+    assert _defines(ROOT / "rules/no-agent-runtime.yml", "no-agent-runtime")
+    assert not _defines(ROOT / "rules/no-agent-runtime.yml", "no-agent")
+    assert _defines(ROOT / "pyproject.toml", "tool.basedpyright.typeCheckingMode")
+    assert not _defines(ROOT / "pyproject.toml", "tool.basedpyright.nope")
+    assert _defines(ROOT / "tests/test_agents_table.py", "test_every_rule_cites_a_defined_check")
+    assert not _defines(ROOT / "tests/test_agents_table.py", "test_every_rule")

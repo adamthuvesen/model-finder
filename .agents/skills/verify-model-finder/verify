@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
 import re
 import shutil
@@ -97,6 +98,44 @@ def real_state() -> list[str]:
     ]
 
 
+def file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else "absent"
+
+
+def repo_state() -> dict[str, str]:
+    """HEAD, the branch, git config and hooks, and every changed, untracked, or ignored path.
+
+    Changed and untracked files compare by content. Ignored files compare by size and mtime,
+    because `.venv` holds too many files to hash.
+    """
+    common = (ROOT / git("rev-parse", "--git-common-dir")).resolve()
+    state = {".git/config": file_digest(common / "config")}
+    state |= {f".git/hooks/{hook.name}": file_digest(hook) for hook in (common / "hooks").glob("*")}
+    status = git("status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all", "--ignored")
+    entries = iter(status.split("\0"))
+    for entry in entries:
+        if entry.startswith("# branch."):
+            key, _, value = entry.removeprefix("# ").partition(" ")
+            state[key] = value
+            continue
+        if not entry or entry.startswith("#"):
+            continue
+        kind = entry[0]
+        fields = {"1": 8, "2": 9, "u": 10}.get(kind)
+        path = entry.split(" ", fields)[fields] if fields else entry[2:]
+        if kind == "2":
+            next(entries)
+        if path.startswith(".verify/") or "__pycache__" in path.split("/"):
+            continue
+        target = ROOT / path
+        if kind == "!":
+            info = target.lstat()
+            state[path] = f"ignored:{info.st_size}:{info.st_mtime_ns}"
+        else:
+            state[path] = f"{entry.split(' ', 2)[1] if fields else kind}:{file_digest(target)}"
+    return state
+
+
 def start_ctx(name: str, run_dir: Path, scratch_root: Path) -> Ctx:
     scratch = Path(tempfile.mkdtemp(prefix=f"{name}-", dir=scratch_root))
     (scratch / "home/.local/share").mkdir(parents=True)
@@ -174,12 +213,13 @@ def main(argv: list[str]) -> int:
     run_dir = (
         ROOT
         / ".verify/runs"
-        / f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{sha}{'-dirty' if dirty else ''}"
+        / f"{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}-{sha}{'-dirty' if dirty else ''}"
     )
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir.parent.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir()
     scratch_root = Path(tempfile.mkdtemp(prefix="verify-model-finder-"))
     atexit.register(shutil.rmtree, scratch_root, ignore_errors=True)
-    before, results = real_state(), []
+    before, checkout, results = real_state(), repo_state(), []
     Fixture.ctx = start_ctx("fixture", run_dir, scratch_root)
     with ThreadPoolExecutor(max_workers=max(len(names), 1)) as pool:
         futures = [pool.submit(run_one, n, run_dir, scratch_root) for n in names]
@@ -198,6 +238,13 @@ def main(argv: list[str]) -> int:
             }
         )
         print("FAIL tripwire 0s the real holdout store or sources.json changed during the run")
+    after = repo_state()
+    if changed := sorted(
+        k for k in checkout.keys() | after.keys() if checkout.get(k) != after.get(k)
+    ):
+        detail = f"the run changed the checkout: {', '.join(changed)}"
+        results.append({"drive": "repo-state", "result": "FAIL", "seconds": 0, "detail": detail})
+        print(f"FAIL repo-state 0s {detail}")
     (run_dir / "summary.json").write_text(
         json.dumps({"sha": git("rev-parse", "HEAD"), "dirty": dirty, "drives": results}, indent=1)
     )

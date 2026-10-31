@@ -7,6 +7,9 @@ import sys
 from pathlib import Path
 
 BIN = Path(".venv/bin")
+# basedpyright skips dot-folders, so the verify skill is type-checked as its own project.
+VERIFY_SKILL = ".agents/skills/verify-model-finder"
+VERIFY_SCRIPT = f"{VERIFY_SKILL}/verify"
 
 
 def _changed_python_files() -> list[str]:
@@ -18,10 +21,17 @@ def _changed_python_files() -> list[str]:
     for command in listings:
         done = subprocess.run(command, capture_output=True, text=True, check=False)
         names.update(name for name in done.stdout.split("\0") if name)
-    return sorted(name for name in names if name.endswith(".py") and Path(name).is_file())
+    return sorted(
+        name
+        for name in names
+        if (name.endswith(".py") or name == VERIFY_SCRIPT) and Path(name).is_file()
+    )
 
 
 def _tool_commands(files: list[str]) -> list[list[str]]:
+    skill_files = [f for f in files if f.startswith(f"{VERIFY_SKILL}/")]
+    other_files = [f for f in files if f not in skill_files]
+    python_files = [f for f in files if f.endswith(".py")]
     commands = [
         [
             str(BIN / "ruff"),
@@ -32,10 +42,13 @@ def _tool_commands(files: list[str]) -> list[list[str]]:
             *files,
         ],
         [str(BIN / "ruff"), "format", "--force-exclude", "--check", "--quiet", *files],
-        [str(BIN / "basedpyright"), "--level", "error", *files],
     ]
-    if Path("sgconfig.yml").is_file():
-        commands.append([str(BIN / "ast-grep"), "scan", "--error", *files])
+    if other_files:
+        commands.append([str(BIN / "basedpyright"), "--level", "error", *other_files])
+    if skill_files:
+        commands.append([str(BIN / "basedpyright"), "--level", "error", "--project", VERIFY_SKILL])
+    if Path("sgconfig.yml").is_file() and python_files:
+        commands.append([str(BIN / "ast-grep"), "scan", "--error", *python_files])
     return commands
 
 

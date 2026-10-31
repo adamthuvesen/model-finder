@@ -28,6 +28,8 @@ and text, and the last line the command printed. The run ends with `evidence: <d
 
 A `tripwire` FAIL means the run called `claude`, `codex`, `modal`, or another stub on `PATH`, or it
 changed the real holdout store or `~/.config/model-finder/sources.json`.
+A `repo-state` FAIL means the run changed this checkout: a file, the index, HEAD, an ignored path,
+or `.git/config`. Drives work on copies only.
 
 ## Limits
 
