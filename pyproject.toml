@@ -163,6 +163,18 @@ ignore = ["E501", "TRY003", "PLR2004", "PLR0913", "PLR0917", "ANN401"]
 "os.spawnve".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
 "os.spawnvp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
 "os.spawnvpe".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"socket".msg = "No network client in the engine, because only a warehouse driver reaches the network. Fix: read the data through `experiment pull`."
+"http.client".msg = "No network client in the engine, because only a warehouse driver reaches the network. Fix: read the data through `experiment pull`."
+"urllib.request".msg = "No network client in the engine, because only a warehouse driver reaches the network. Fix: read the data through `experiment pull`."
+"requests".msg = "No network client in the engine, because only a warehouse driver reaches the network. Fix: read the data through `experiment pull`."
+"httpx".msg = "No network client in the engine, because only a warehouse driver reaches the network. Fix: read the data through `experiment pull`."
+"adbc_driver_manager".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
+"adbc_driver_postgresql".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
+"adbc_driver_snowflake".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
+"adbc_driver_bigquery".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
+"databricks".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
+"redshift_connector".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
+"duckdb".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["TID251", "S101", "S108", "S603", "S607", "B010", "ANN", "ARG", "PLC0415", "SLF001", "FBT", "T20", "TRY", "PTH123"]

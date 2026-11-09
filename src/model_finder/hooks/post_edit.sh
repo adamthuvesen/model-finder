@@ -17,12 +17,23 @@ IFS='
 for file in $files; do
   [ -f "$file" ] || continue
   case "$file" in
-    *.py)
+    *.py|"$root"/.agents/skills/*/verify)
       if [ -x "$bin/ruff" ]; then
         "$bin/ruff" format --force-exclude --quiet "$file" >/dev/null 2>&1
         add "$("$bin/ruff" check --force-exclude --quiet --output-format=concise "$file" 2>&1)"
       fi
-      if [ -x "$bin/basedpyright" ]; then
+      # basedpyright skips dot-folders, so a skill with its own config is checked as a project.
+      skill=""
+      case "$file" in
+        "$root"/.agents/skills/*/*)
+          rest="${file#"$root"/.agents/skills/}"
+          skill="$root/.agents/skills/${rest%%/*}"
+          [ -f "$skill/pyrightconfig.json" ] || skill=""
+          ;;
+      esac
+      if [ -x "$bin/basedpyright" ] && [ -n "$skill" ]; then
+        add "$("$bin/basedpyright" --level error --project "$skill" 2>&1 | grep ' - error')"
+      elif [ -x "$bin/basedpyright" ]; then
         add "$("$bin/basedpyright" --level error "$file" 2>&1 | grep ' - error')"
       fi
       ;;

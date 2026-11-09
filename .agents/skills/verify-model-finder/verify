@@ -41,7 +41,7 @@ TRIPWIRE_TOOLS = ("claude", "codex", "cursor-agent", "modal", "launchctl", "brew
 
 
 def changed_files() -> set[str]:
-    base = git("merge-base", "HEAD", "main") or git("merge-base", "HEAD", "origin/main") or "HEAD"
+    base = git("merge-base", "HEAD", "origin/main") or git("merge-base", "HEAD", "main") or "HEAD"
     names = (
         git("diff", "--name-only", base).splitlines()
         + git("ls-files", "--others", "--exclude-standard").splitlines()
@@ -228,6 +228,14 @@ def main(argv: list[str]) -> int:
         for future in as_completed(futures):
             results.append(future.result())
             print("{result} {drive} {seconds}s {detail}".format(**results[-1]), flush=True)
+    # run_one reads only its own drive's log, so the shared fixture and the control need this.
+    if hits := sorted(scratch_root.glob("*/tripwire.log")):
+        calls = [
+            f"{log.parent.name}: {call}" for log in hits for call in log.read_text().splitlines()
+        ]
+        detail = "; ".join(calls)
+        results.append({"drive": "tripwire", "result": "FAIL", "seconds": 0, "detail": detail})
+        print(f"FAIL tripwire 0s a stubbed tool was called: {detail}")
     if real_state() != before:
         results.append(
             {

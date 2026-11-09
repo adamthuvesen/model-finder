@@ -87,6 +87,18 @@ def test_a_python_edit_is_formatted_and_its_findings_are_reported(tmp_path: Path
     assert (repo / "bad.py").read_text().endswith("x = 1\n")
 
 
+def test_a_skill_edit_is_type_checked_as_the_skills_own_project(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    skill = repo / ".agents/skills/verify-demo"
+    skill.mkdir(parents=True)
+    (skill / "pyrightconfig.json").write_text('{"include": ["."]}')
+    (skill / "helper.py").write_text('VALUE: int = "not an int"\n')
+    done = _run_hook(repo, str(skill / "helper.py"))
+    assert done.returncode == 0
+    context = json.loads(done.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert "helper.py:1:14 - error" in context
+
+
 def test_a_clean_edit_says_nothing(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     (repo / "good.py").write_text("VALUE = 1\n")

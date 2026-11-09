@@ -68,6 +68,7 @@ Cite each check as `path::name`. `tests/test_agents_table.py` fails unless that 
 | Rule | Enforced by | Added | Limit |
 | --- | --- | --- | --- |
 | No agent SDK or spawned process | `pyproject.toml::tool.ruff.lint.flake8-tidy-imports.banned-api.subprocess`, `rules/no-agent-runtime.yml::no-agent-runtime` | 2026-11-04 | `getattr(os, ...)` passes |
+| No network client or static warehouse driver import outside the source adapters | `pyproject.toml::tool.ruff.lint.flake8-tidy-imports.banned-api.socket`, `pyproject.toml::tool.ruff.lint.flake8-tidy-imports.banned-api.adbc_driver_snowflake` | 2026-11-07 | Imports only. `importlib.import_module` passes, which is how `src/model_finder/sources/adapters.py` loads drivers |
 | Pulls are read-only, with no override | `src/model_finder/sources/query.py::require_read_only_query`, `src/model_finder/sources/manifest.py::verify_snapshot` | 2026-06-07 | Defence in depth: the warehouse role is the real guard |
 | The agent does not read the holdout store | `src/model_finder/cli/agent_rules.py::HOLDOUT_DENY_RULES`, `src/model_finder/cli/setup.py::_write_deny_rules`, `src/model_finder/cli/guard.py::refusal` | 2026-11-04 | Deny rules for Claude Code, the guard hook for Codex and Cursor. Both match names, so a path a script builds passes |
 | A consumer's declared claude.ai connector writes are denied | `src/model_finder/cli/agent_rules.py::connector_rules`, `src/model_finder/cli/guard.py::refusal` | 2026-11-06 | A tool the declaration omits stays allowed |
