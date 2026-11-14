@@ -99,6 +99,20 @@ def test_a_skill_edit_is_type_checked_as_the_skills_own_project(tmp_path: Path) 
     assert "helper.py:1:14 - error" in context
 
 
+def test_a_shell_verify_script_in_a_skill_without_a_type_config_says_nothing(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    skill = repo / ".agents/skills/verify-demo"
+    skill.mkdir(parents=True)
+    (skill / "verify").write_text(
+        '#!/bin/bash\nset -euo pipefail\nif [ -n "$1" ]; then echo "$1"; fi\n'
+    )
+    done = _run_hook(repo, str(skill / "verify"))
+    assert done.returncode == 0
+    assert done.stdout == ""
+
+
 def test_a_clean_edit_says_nothing(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     (repo / "good.py").write_text("VALUE = 1\n")

@@ -16,21 +16,24 @@ IFS='
 '
 for file in $files; do
   [ -f "$file" ] || continue
+  # basedpyright skips dot-folders, so a skill with its own config is checked as a project,
+  # and only such a skill's extensionless `verify` script counts as Python.
+  skill=""
   case "$file" in
-    *.py|"$root"/.agents/skills/*/verify)
+    "$root"/.agents/skills/*/*)
+      rest="${file#"$root"/.agents/skills/}"
+      skill="$root/.agents/skills/${rest%%/*}"
+      [ -f "$skill/pyrightconfig.json" ] || skill=""
+      ;;
+  esac
+  kind="$file"
+  [ -n "$skill" ] && [ "$file" = "$skill/verify" ] && kind="$file.py"
+  case "$kind" in
+    *.py)
       if [ -x "$bin/ruff" ]; then
         "$bin/ruff" format --force-exclude --quiet "$file" >/dev/null 2>&1
         add "$("$bin/ruff" check --force-exclude --quiet --output-format=concise "$file" 2>&1)"
       fi
-      # basedpyright skips dot-folders, so a skill with its own config is checked as a project.
-      skill=""
-      case "$file" in
-        "$root"/.agents/skills/*/*)
-          rest="${file#"$root"/.agents/skills/}"
-          skill="$root/.agents/skills/${rest%%/*}"
-          [ -f "$skill/pyrightconfig.json" ] || skill=""
-          ;;
-      esac
       if [ -x "$bin/basedpyright" ] && [ -n "$skill" ]; then
         add "$("$bin/basedpyright" --level error --project "$skill" 2>&1 | grep ' - error')"
       elif [ -x "$bin/basedpyright" ]; then

@@ -93,7 +93,10 @@ def preflight() -> None:
 
 def real_state() -> list[str]:
     listing = (
-        sorted(str(p.relative_to(REAL_STORE)) for p in REAL_STORE.rglob("*"))
+        sorted(
+            f"{p.relative_to(REAL_STORE)}:{p.lstat().st_size}:{p.lstat().st_mtime_ns}"
+            for p in REAL_STORE.rglob("*")
+        )
         if REAL_STORE.is_dir()
         else []
     )
