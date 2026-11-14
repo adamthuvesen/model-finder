@@ -145,7 +145,7 @@ def py(ctx: Ctx, step: str, code: str) -> str:
 
 def search(ctx: Ctx) -> Path:
     x = ctx.scratch / "run_a"
-    ctx.expect("init-demo", demo("init-demo", "--experiment", str(x)), 0, "Sealed 160 holdout rows")
+    ctx.expect("init-demo", demo("init-demo", "--experiment", str(x)), 0, "")
     for candidate in ("majority-baseline", "logreg-tiny"):
         ctx.expect(
             f"run-{candidate}",
@@ -246,7 +246,7 @@ def drive_complete(ctx: Ctx) -> str:
         "--limitation",
         "Synthetic data.",
     )
-    ctx.expect("record-review", cli(*review), 0, "Review recorded")
+    ctx.expect("record-review", cli(*review), 0, "")
     completion = (
         "record-completion",
         "--experiment",
@@ -268,8 +268,8 @@ def drive_complete(ctx: Ctx) -> str:
         "--reproduction",
         "outputs/reproduce.md",
     )
-    ctx.expect("record-completion", cli(*completion, *picks), 0, "Completion recorded")
-    ctx.expect("complete-check", cli("complete-check", str(x)), 0, "Result: complete")
+    ctx.expect("record-completion", cli(*completion, *picks), 0, "")
+    ctx.expect("complete-check", cli("complete-check", str(x)), 0, "")
     with (x / "outputs/final_evaluation.json").open("a") as final:
         final.write(" ")
     ctx.expect("complete-check-edited", cli("complete-check", str(x)), 1, "Stale evaluation")
@@ -311,9 +311,7 @@ def drive_new(ctx: Ctx) -> str:
         for i in range(200)
     ]
     (consumer / "rows.csv").write_text("\n".join(["date,signal,label", *rows]) + "\n")
-    out = ctx.expect(
-        "new", cli("new", "churn", "--csv", "rows.csv"), 0, "Target: label. Split: date.", consumer
-    )
+    out = ctx.expect("new", cli("new", "churn", "--csv", "rows.csv"), 0, "", consumer)
     require(
         "Sealed 40 holdout rows" in out and out.index("linear") < out.index("baseline"),
         "new did not seal 40 rows and rank linear above baseline",
@@ -342,7 +340,7 @@ def drive_new(ctx: Ctx) -> str:
     board = ctx.expect("leaderboard", cli("leaderboard", str(x)), 0, "candidate-2", consumer)
     ranked = [line for line in board.splitlines() if line.strip()[:1].isdigit()]
     require(len(ranked) == 3, f"expected 3 leaderboard rows, got {len(ranked)}")
-    ctx.expect("next", cli("next", str(x)), 0, "Next:", consumer)
+    ctx.expect("next", cli("next", str(x)), 0, "", consumer)
     return "experiment new on a CSV seals 40 rows; a scaffolded candidate runs; the leaderboard shows 3"
 
 

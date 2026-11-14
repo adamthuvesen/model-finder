@@ -162,6 +162,8 @@ def run_one(name: str, run_dir: Path, scratch_root: Path) -> dict[str, object]:
         result, detail = "PASS", DRIVES[name].run(ctx)
     except DriveFailure as failure:
         result, detail = "FAIL", str(failure)
+    except SystemExit as early_exit:
+        result, detail = "FAIL", f"the drive exited the process early (exit {early_exit.code!r})"
     if (ctx.scratch / "tripwire.log").exists():
         result, detail = (
             "FAIL",

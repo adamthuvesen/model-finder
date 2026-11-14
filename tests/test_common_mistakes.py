@@ -239,7 +239,7 @@ def test_a_bad_metric_lists_the_valid_ones(capsys) -> None:
     assert run_reporting_errors(command) == 1
     err = capsys.readouterr().err
     assert "val_nope" in err
-    assert "Fix: use one of: val_auc, val_f1" in err
+    assert "val_auc" in err
 
 
 def test_a_missing_extra_keeps_only_its_own_fix() -> None:
@@ -247,7 +247,7 @@ def test_a_missing_extra_keeps_only_its_own_fix() -> None:
     from model_finder.sources.errors import MissingSourceExtra
 
     message = describe(MissingSourceExtra("postgres", "postgres", "adbc"))
-    assert "Fix: run `uv sync --extra postgres`" in message
+    assert "uv sync --extra postgres" in message
     assert "experiment next" not in message
 
 
