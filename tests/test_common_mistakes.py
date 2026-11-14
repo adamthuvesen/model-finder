@@ -171,7 +171,7 @@ def _candidate_file(tmp_path: Path, body: str) -> Candidates:
     source.write_text(body)
     namespace: dict[str, object] = {"Candidates": Candidates, "Scoring": Scoring, "np": np}
     exec(compile(source.read_text(), str(source), "exec"), namespace)  # noqa: S102
-    return namespace["candidates"]  # pyright: ignore[reportReturnType]
+    return namespace["candidates"]  # pyright: ignore[reportReturnType] -- the exec namespace holds object values
 
 
 HEADER = 'candidates = Candidates(Scoring.classification("label"))\n\n'

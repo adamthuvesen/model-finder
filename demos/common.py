@@ -27,8 +27,8 @@ def classification_metrics(y_true: pd.Series, probabilities: np.ndarray) -> dict
         "auc": float(roc_auc_score(y_true, probabilities)),
         "log_loss": float(log_loss(y_true, probabilities, labels=[0, 1])),
         "accuracy": float(accuracy_score(y_true, predictions)),
-        "precision": float(precision_score(y_true, predictions, zero_division=0)),  # pyright: ignore[reportArgumentType]
-        "recall": float(recall_score(y_true, predictions, zero_division=0)),  # pyright: ignore[reportArgumentType]
+        "precision": float(precision_score(y_true, predictions, zero_division=0)),  # pyright: ignore[reportArgumentType] -- sklearn stubs type the score as a float or an array
+        "recall": float(recall_score(y_true, predictions, zero_division=0)),  # pyright: ignore[reportArgumentType] -- sklearn stubs type the score as a float or an array
     }
 
 

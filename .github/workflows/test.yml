@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  fast:
+  check:
     runs-on: ubuntu-latest
 
     steps:
@@ -34,7 +34,7 @@ jobs:
           retention-days: 1
 
   verify:
-    needs: fast
+    needs: check
     runs-on: ubuntu-latest
 
     steps:
