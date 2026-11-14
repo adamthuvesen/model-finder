@@ -28,7 +28,7 @@ for file in $files; do
   kind="$file"
   case "$file" in
     "$root"/.agents/skills/*/verify)
-      head -n 1 "$file" | grep -q python && kind="$file.py"
+      head -n 1 "$file" | grep -qE "python|pypy|uv run" && kind="$file.py"
       ;;
   esac
   case "$kind" in

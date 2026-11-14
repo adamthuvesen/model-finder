@@ -174,7 +174,6 @@ ignore = ["E501", "TRY003", "PLR2004", "PLR0913", "PLR0917", "ANN401"]
 "adbc_driver_bigquery".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
 "databricks".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
 "redshift_connector".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
-"duckdb".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["TID251", "S101", "S108", "S603", "S607", "B010", "ANN", "ARG", "PLC0415", "SLF001", "FBT", "T20", "TRY", "PTH123"]

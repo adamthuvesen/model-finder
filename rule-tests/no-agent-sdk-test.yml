@@ -8,3 +8,4 @@ invalid:
   - import openai.types as types
   - from claude_agent_sdk import query
   - from langchain_core.messages import HumanMessage
+  - import langgraph

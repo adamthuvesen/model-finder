@@ -1,9 +1,12 @@
 id: no-agent-sdk
 language: python
 severity: error
-message: "The native goal runs the agent, so scripts, tests, and skills must not call an agent SDK either. Fix: remove this import."
-# ruff's banned-api covers the engine; these paths ignore TID251 because they start processes.
+message: "The native goal runs the agent, so no code here may call an agent SDK. Fix: remove this import."
+# ruff's banned-api names only exact modules, and scripts, tests, and skills ignore TID251.
 files:
+  - src/**/*.py
+  - demos/**/*.py
+  - experiments/**/*.py
   - scripts/**/*.py
   - tests/**/*.py
   - .agents/**/*.py
@@ -13,8 +16,8 @@ rule:
       has:
         stopBy: end
         kind: dotted_name
-        regex: ^(anthropic|openai|litellm|langchain[a-z_]*|claude_agent_sdk|claude_code_sdk)(\.|$)
+        regex: ^(anthropic|openai|litellm|langchain[a-z_]*|langgraph|claude_agent_sdk|claude_code_sdk)(\.|$)
     - kind: import_from_statement
       has:
         field: module_name
-        regex: ^(anthropic|openai|litellm|langchain[a-z_]*|claude_agent_sdk|claude_code_sdk)(\.|$)
+        regex: ^(anthropic|openai|litellm|langchain[a-z_]*|langgraph|claude_agent_sdk|claude_code_sdk)(\.|$)

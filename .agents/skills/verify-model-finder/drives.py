@@ -490,9 +490,18 @@ def drive_wheel(ctx: Ctx) -> str:
     require(not allowed.strip(), f"the Codex guard refused a plain ls: {allowed[:120]!r}")
     (consumer / "results.json").write_text("[]")
     edit = json.dumps({"tool_input": {"file_path": str(consumer / "results.json")}})
+    post_tool_use = json.loads((consumer / ".claude/settings.json").read_text())["hooks"][
+        "PostToolUse"
+    ]
+    post_edit = [
+        h["command"] for e in post_tool_use for h in e["hooks"] if "post_edit" in h["command"]
+    ]
+    require(
+        len(post_edit) == 1, f"expected one post-edit hook in .claude/settings.json: {post_edit}"
+    )
     ctx.expect(
         "post-edit",
-        ["sh", str(consumer / ".agents/hooks/post_edit.sh"), "claude"],
+        ["sh", "-c", post_edit[0]],
         0,
         "experiment rebuild-results",
         consumer,

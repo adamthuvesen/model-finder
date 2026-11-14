@@ -116,11 +116,14 @@ def test_a_shell_verify_script_in_a_skill_says_nothing(
     assert done.stdout == ""
 
 
-def test_a_python_verify_script_in_a_skill_without_a_type_config_is_linted(tmp_path: Path) -> None:
+@pytest.mark.parametrize("shebang", ["#!/usr/bin/env python3", "#!/usr/bin/env -S uv run --script"])
+def test_a_python_verify_script_in_a_skill_without_a_type_config_is_linted(
+    tmp_path: Path, shebang: str
+) -> None:
     repo = _repo(tmp_path)
     skill = repo / ".agents/skills/verify-demo"
     skill.mkdir(parents=True)
-    (skill / "verify").write_text("#!/usr/bin/env python3\nimport os\n")
+    (skill / "verify").write_text(f"{shebang}\nimport os\n")
     done = _run_hook(repo, str(skill / "verify"))
     context = json.loads(done.stdout)["hookSpecificOutput"]["additionalContext"]
     assert "verify:2:8: F401" in context
