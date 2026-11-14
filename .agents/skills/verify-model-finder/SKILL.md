@@ -35,7 +35,6 @@ or `.git/config`. Drives work on copies only.
 
 - No drive pulls from a warehouse or seals a snapshot (`experiment pull`, `experiment seal`).
   `tests/test_sources.py` covers those with DuckDB.
-- The torch and GBDT demos are not driven here. `make slow` runs them in `tests/verify`.
 - The guard is driven only through the Codex hook. The Cursor and Claude Code clients are not run.
 
 ## Gotchas
@@ -43,5 +42,5 @@ or `.git/config`. Drives work on copies only.
 - `uv build` and `uv pip install` run with the real HOME, because uv keeps its managed Python and
   cache there. They run with `--offline`, so a cold uv cache fails the `wheel` drive. Run `make setup`.
 - The first import in a new venv can take 10s on macOS. The `wheel` drive pays this on every run.
-- `complete`, `reseal`, and `replay` copy one demo experiment that the run builds once. The copy
+- `complete` and `reseal` copy one demo experiment that the run builds once. The copy
   works because the experiment and the holdout store hold no absolute paths.

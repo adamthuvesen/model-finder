@@ -39,25 +39,29 @@ def _started(config: RunnerConfig, experiment: Path, *flags: str) -> Path:
     return experiment
 
 
-def _replay(experiment: Path, tmp_path: Path) -> str:
-    output = tmp_path / "replay.html"
-    assert main(["replay", str(experiment), "--output", str(output)]) == 0
-    return output.read_text()
+def _leaderboard(experiment: Path, capsys) -> str:
+    capsys.readouterr()
+    assert main(["leaderboard", str(experiment)]) == 0
+    return capsys.readouterr().out
 
 
-def test_replay_shows_the_label_with_no_holdout(config: RunnerConfig, tmp_path: Path) -> None:
+def test_leaderboard_shows_the_label_with_no_holdout(
+    config: RunnerConfig, tmp_path: Path, capsys
+) -> None:
     experiment = _started(config, tmp_path / "e", "--no-holdout")
-    assert 'id="exploratory-label"' in _replay(experiment, tmp_path)
+    assert "Exploratory: no holdout is sealed." in _leaderboard(experiment, capsys)
 
 
-def test_replay_shows_the_label_after_a_reread(config: RunnerConfig, tmp_path: Path) -> None:
+def test_leaderboard_shows_the_label_after_a_reread(
+    config: RunnerConfig, tmp_path: Path, capsys
+) -> None:
     experiment = _started(config, tmp_path / "e")
-    assert 'id="exploratory-label"' not in _replay(experiment, tmp_path)
+    assert "Exploratory" not in _leaderboard(experiment, capsys)
     assert _step(config, "freeze-candidate", experiment, "--candidate", "quick") == 0
     assert _step(config, "evaluate-final", experiment) == 0
     flags = ["--allow-reread", "--reason", "A scoring bug."]
     assert _step(config, "evaluate-final", experiment, *flags) == 0
-    assert 'id="exploratory-label"' in _replay(experiment, tmp_path)
+    assert "a holdout read informed or repeated" in _leaderboard(experiment, capsys)
 
 
 def _edit_run_record(experiment: Path, score: float) -> None:

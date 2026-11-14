@@ -64,7 +64,7 @@ def get_key_columns(experiment_dir: Path) -> list[str]:
 def research_journal_template(experiment_id: str) -> str:
     return (
         f"# Research Journal: {experiment_id}\n\n"
-        "Head each entry `## Cycle NNNN: <title>` so the replay can read it.\n"
+        "Head each entry `## Cycle NNNN: <title>`.\n"
         "Write one entry per hypothesis: what you set out to learn, what you found,\n"
         "and what it means for next steps.\n"
     )

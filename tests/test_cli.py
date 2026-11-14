@@ -77,13 +77,6 @@ def test_validate_failure_goes_to_stderr(tmp_path: Path, capsys) -> None:
     assert "does not exist" in captured.err
 
 
-def test_replay_on_a_missing_experiment_creates_nothing(tmp_path: Path, capsys) -> None:
-    absent = tmp_path / "absent"
-    assert main(["replay", str(absent)]) == 1
-    assert "does not exist" in capsys.readouterr().err
-    assert not absent.exists()
-
-
 def _pulled(tmp_path: Path) -> Path:
     pyarrow = pytest.importorskip("pyarrow")
 

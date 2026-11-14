@@ -7,7 +7,7 @@ engine's commands. The engine holds no long-lived state of its own.
 /goal in Claude Code or Codex
   -> research skill
   -> experiments/<slug>/model/run.py (or your own runner) -> model_finder.runner
-  -> experiment next | new | candidate new | seal | reseal | complete-check | replay | pull
+  -> experiment next | new | candidate new | seal | reseal | complete-check | pull
 ```
 
 ## Layers

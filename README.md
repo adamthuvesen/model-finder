@@ -37,14 +37,12 @@ demo run-candidate --experiment experiments/my_run --candidate logreg-tiny
 demo freeze-candidate --experiment experiments/my_run --candidate logreg-tiny
 demo evaluate-final --experiment experiments/my_run     # reads the holdout once
 uv run experiment validate experiments/my_run
-uv run experiment replay experiments/my_run           # writes outputs/replay.html
+uv run experiment leaderboard experiments/my_run
 ```
 
 `evaluate-final` needs a frozen selection. A second read needs `--allow-reread --reason <text>`, and it labels the
 estimate exploratory. Sealed rows are written under
 `$XDG_DATA_HOME/model-finder/holdouts/`, defaulting to `~/.local/share`.
-Open [`examples/demo_bootstrap_replay.html`](examples/demo_bootstrap_replay.html) to see a replay
-without running anything.
 
 ## Use your own CSV
 
@@ -97,9 +95,6 @@ or `not complete`.
 | Demo | Problem | Install |
 | --- | --- | --- |
 | `demo_bootstrap` | Small classification smoke test | `--extra models` |
-| `demo_classification` | Binary classification | `--extra models` |
-| `demo_regression` | Zero-inflated revenue regression | `--extra models` |
-| `demo_deep` | Nonlinear classification with PyTorch MLPs | `--extra deep` |
 
 All data is synthetic and generated in memory. Run `python -m demos.<demo> list-candidates`.
 Each `init-demo` generates new rows, so you can run a demo as many times as you like.

@@ -93,10 +93,6 @@ def test_demo_runs_from_search_to_reviewed_completion(tmp_path: Path, capsys) ->
     assert experiment_main(["complete-check", path]) == 0
     assert "Result: complete\n" in capsys.readouterr().out
 
-    replay = tmp_path / "replay.html"
-    assert experiment_main(["replay", path, "--output", str(replay)]) == 0
-    assert "logreg-tiny" in replay.read_text()
-
     capsys.readouterr()
     final_path = experiment / "outputs/final_evaluation.json"
     edited = json.loads(final_path.read_text())

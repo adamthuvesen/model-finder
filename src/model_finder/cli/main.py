@@ -31,7 +31,6 @@ from model_finder.labels import leaderboard_label
 from model_finder.paths import (
     DATA_DIRNAME,
     HOLDOUT_SEAL_FILE_NAME,
-    OUTPUTS_DIRNAME,
     require_experiment_dir,
 )
 from model_finder.rebuild import rebuild_results
@@ -59,7 +58,6 @@ from model_finder.sources.snapshot import (
     split_snapshot_without_holdout,
 )
 from model_finder.validation import validate_experiment
-from model_finder.viz.bundle import write_replay
 
 _PACKAGE_ROOT = Path(__file__).parents[1]
 CONTRACT_DOCUMENTS = {
@@ -273,13 +271,6 @@ def _reseal(args: argparse.Namespace) -> int:
     print(f"Sealed {seal.holdout_rows} new rows: {seal.holdout_sha256}")
     warn_rows_stay_readable(rows_path)
     warn_if_already_read(seal.holdout_sha256)
-    return 0
-
-
-def _replay(args: argparse.Namespace) -> int:
-    experiment_dir = Path(args.experiment)
-    output = Path(args.output) if args.output else experiment_dir / OUTPUTS_DIRNAME / "replay.html"
-    print(write_replay(experiment_dir, output))
     return 0
 
 
@@ -530,11 +521,6 @@ def _parser() -> argparse.ArgumentParser:
     _add_reseal_arguments(
         subparsers.add_parser("reseal", help="Seal new rows, retiring any current holdout")
     )
-
-    replay = subparsers.add_parser("replay", help="Render results and the journal to HTML")
-    replay.add_argument("experiment")
-    replay.add_argument("--output", default=None, help="Default: <experiment>/outputs/replay.html")
-    replay.set_defaults(func=_replay)
 
     _add_pull_arguments(
         subparsers.add_parser("pull", help="Materialize a warehouse snapshot into an experiment")

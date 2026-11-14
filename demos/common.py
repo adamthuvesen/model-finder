@@ -7,10 +7,7 @@ import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
     log_loss,
-    mean_absolute_error,
-    mean_squared_error,
     precision_score,
-    r2_score,
     recall_score,
     roc_auc_score,
 )
@@ -27,12 +24,4 @@ def classification_metrics(y_true: pd.Series, probabilities: np.ndarray) -> dict
         "accuracy": float(accuracy_score(y_true, predictions)),
         "precision": float(precision_score(y_true, predictions, zero_division=0)),  # pyright: ignore[reportArgumentType] -- sklearn stubs type the score as a float or an array
         "recall": float(recall_score(y_true, predictions, zero_division=0)),  # pyright: ignore[reportArgumentType] -- sklearn stubs type the score as a float or an array
-    }
-
-
-def regression_metrics(y_true: pd.Series, predictions: np.ndarray) -> dict[str, float]:
-    return {
-        "r2": float(r2_score(y_true, predictions)),
-        "rmse": float(np.sqrt(mean_squared_error(y_true, predictions))),
-        "mae": float(mean_absolute_error(y_true, predictions)),
     }

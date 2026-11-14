@@ -60,7 +60,6 @@ databricks = [
 redshift = [
     "redshift-connector>=2.1",
 ]
-viz = []
 deep = [
     "model-finder[models]",
     "torch>=2.2.0",
@@ -105,8 +104,6 @@ include = ["model_finder*"]
 model_finder = [
     "templates/*",
     "hooks/*",
-    "viz/renderer/*",
-    "viz/templates/*",
     "sources/bundles/*/*",
     "skills/**/*",
     "contract/*.md",
@@ -219,17 +216,17 @@ reportPrivateUsage = false
 extend_exclude = ["experiments", "examples", "scripts"]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["catboost", "duckdb", "joblib", "matplotlib", "optuna", "polars", "scipy", "seaborn", "shap", "statsmodels", "tqdm", "adbc-driver-manager", "adbc-driver-postgresql", "adbc-driver-snowflake", "adbc-driver-bigquery", "databricks-sql-connector", "redshift-connector"]
+DEP002 = ["catboost", "duckdb", "joblib", "matplotlib", "optuna", "polars", "scipy", "seaborn", "shap", "statsmodels", "torch", "tqdm", "xgboost", "adbc-driver-manager", "adbc-driver-postgresql", "adbc-driver-snowflake", "adbc-driver-bigquery", "databricks-sql-connector", "redshift-connector"]
 
 [tool.vulture]
 paths = ["src", "demos"]
 min_confidence = 60
 ignore_decorators = ["@model_validator", "@field_validator"]
-# The console script, torch's forward, and the public helpers that experiment scripts
+# The console script and the public helpers that experiment scripts
 # call. Vulture sees none of these callers. `make dead` adds every Pydantic field itself.
 ignore_names = [
     "Candidates", "classification", "regression", "label", "validate_label_dates",
-    "forward", "main", "outputs_dir", "work_dir", "scripts_dir", "save_completion",
+    "main", "outputs_dir", "work_dir", "scripts_dir", "save_completion",
 ]
 
 [tool.importlinter]
@@ -251,7 +248,7 @@ containers = ["model_finder"]
 exhaustive = true
 layers = [
     "cli",
-    "completion : viz",
+    "completion",
     "labels : rebuild : reseal",
     "final_evaluation : runner",
     "data_audit : validation",

@@ -169,7 +169,7 @@ def freeze_and_evaluate(ctx: Ctx, x: Path) -> None:
 
 
 class Fixture:
-    """Builds the demo experiment once per run, searched and then evaluated. Drives copy a snapshot, since it holds no absolute paths."""
+    """Builds the evaluated demo experiment once per run. Drives copy a snapshot, since it holds no absolute paths."""
 
     lock = threading.Lock()
     snapshots: dict[str, Path] = {}  # noqa: RUF012
@@ -180,7 +180,6 @@ class Fixture:
         with cls.lock:
             if not cls.snapshots:
                 x = search(cls.ctx)
-                cls.snapshots["searched"] = cls.snapshot("searched", x)
                 freeze_and_evaluate(cls.ctx, x)
                 cls.snapshots["evaluated"] = cls.snapshot("evaluated", x)
         for part in ("run_a", "home"):
@@ -226,7 +225,8 @@ def drive_holdout_flow(ctx: Ctx) -> str:
         1,
         "holdout-informed",
     )
-    return "160 rows sealed away from 640 search rows; holdout read once, only after a freeze"
+    check_missing_experiment(ctx)
+    return "160 rows sealed away from 640 search rows; holdout read once, only after a freeze; a missing experiment is one error line"
 
 
 def drive_complete(ctx: Ctx) -> str:
@@ -356,18 +356,6 @@ def check_missing_experiment(ctx: Ctx, code: int = 1) -> None:
         code,
         "does not exist",
     )
-
-
-def drive_replay(ctx: Ctx) -> str:
-    x = Fixture.copy(ctx, "searched")
-    ctx.expect("replay", cli("replay", str(x)), 0, "replay.html")
-    shutil.copy(x / "outputs/replay.html", ctx.evidence / "replay.html")
-    require(
-        "logreg-tiny" in (x / "outputs/replay.html").read_text(),
-        "replay.html does not name logreg-tiny",
-    )
-    check_missing_experiment(ctx)
-    return "replay.html names the leaderboard; a missing experiment is one error line, exit 1"
 
 
 def drive_wheel(ctx: Ctx) -> str:
@@ -519,7 +507,12 @@ class Drive:
 DRIVES = {
     "holdout-flow": Drive(
         "A demo seals its holdout away from search rows and reads it once, after a freeze",
-        ("src/model_finder/*.py", "src/model_finder/cli/runner.py", "demos/**"),
+        (
+            "src/model_finder/*.py",
+            "src/model_finder/cli/runner.py",
+            "src/model_finder/cli/errors.py",
+            "demos/**",
+        ),
         drive_holdout_flow,
     ),
     "complete": Drive(
@@ -544,11 +537,6 @@ DRIVES = {
         "experiment new on a CSV scaffolds a runnable experiment and leaderboard",
         ("src/model_finder/*.py", "src/model_finder/cli/**", "src/model_finder/templates/**"),
         drive_new,
-    ),
-    "replay": Drive(
-        "Replay renders HTML; a missing experiment fails with one line and no traceback",
-        ("src/model_finder/viz/**", "src/model_finder/cli/errors.py"),
-        drive_replay,
     ),
     "wheel": Drive(
         "The built wheel installs offline; setup links skills, deny rules, and a working guard",

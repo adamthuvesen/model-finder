@@ -76,15 +76,14 @@ def _search_steps(
         f"{tool}experiment record-completion --experiment {quoted} --outcome supported "
         '--conclusion "CHANGE: what the evidence supports"',
     )
-    replay = Step("Share a replay.", f"{tool}experiment replay {quoted}")
     if (experiment_dir / COMPLETION_PATH).is_file():
         label = assess_completion(experiment_dir).label
         check = Step(
             f"This work reads: {label}. See why.", f"{tool}experiment complete-check {quoted}"
         )
-        return [check, replay, another]
+        return [check, another]
     if (experiment_dir / FINAL_PATH).is_file():
-        return [record, replay]
+        return [record]
     if (experiment_dir / ATTEMPT_PATH).is_file():
         retry = Step(
             "The last evaluation did not finish. Retry it, which labels it exploratory.",

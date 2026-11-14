@@ -1222,7 +1222,7 @@ requires-dist = [
     { name = "tqdm", marker = "extra == 'models'", specifier = ">=4.66.0" },
     { name = "xgboost", marker = "extra == 'models'", specifier = ">=3.0.4" },
 ]
-provides-extras = ["models", "postgres", "snowflake", "bigquery", "databricks", "redshift", "viz", "deep"]
+provides-extras = ["models", "postgres", "snowflake", "bigquery", "databricks", "redshift", "deep"]
 
 [package.metadata.requires-dev]
 dev = [
