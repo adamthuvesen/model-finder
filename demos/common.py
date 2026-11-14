@@ -1,5 +1,3 @@
-"""Metrics shared by the demos."""
-
 from __future__ import annotations
 
 from pathlib import Path

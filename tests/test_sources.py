@@ -50,9 +50,6 @@ _HAS_DUCKDB = importlib.util.find_spec("duckdb") is not None
 _HAS_ADBC = importlib.util.find_spec("adbc_driver_manager") is not None
 
 
-# --------------------------------------------------------------------------- #
-# Determinism guard
-# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     "query",
     [
@@ -221,9 +218,6 @@ def test_determinism_escape_hatch() -> None:
     require_deterministic_query("SELECT * FROM t LIMIT 10", allow_nondeterministic=True)
 
 
-# --------------------------------------------------------------------------- #
-# As-of rewriting
-# --------------------------------------------------------------------------- #
 def test_as_of_time_travel_rewrites_placeholder() -> None:
     rewritten, recorded = apply_as_of(
         "SELECT * FROM t {as_of} ORDER BY id", "snowflake", "2026-06-01 00:00:00"
@@ -263,9 +257,6 @@ def test_as_of_rejects_trailing_newline() -> None:
         apply_as_of("SELECT * FROM t", "postgres", "2026-06-01\n")
 
 
-# --------------------------------------------------------------------------- #
-# Factory + missing-extra errors
-# --------------------------------------------------------------------------- #
 def test_unknown_source_type_raises() -> None:
     with pytest.raises(ValueError, match="Unknown source type"):
         get_extractor("oracle")
@@ -286,9 +277,6 @@ def test_missing_extra_is_actionable() -> None:
     assert "extra" in message
 
 
-# --------------------------------------------------------------------------- #
-# Manifest model
-# --------------------------------------------------------------------------- #
 def _sample_table():
     return pa.table({"id": [1, 2, 3], "label": ["a", "b", "c"]})
 
@@ -325,9 +313,6 @@ def test_manifest_load_rejects_unknown_keys(tmp_path) -> None:
         DatasetManifest.load(path)
 
 
-# --------------------------------------------------------------------------- #
-# Snapshot integrity (verify_snapshot)
-# --------------------------------------------------------------------------- #
 def test_verify_snapshot_detects_row_and_schema_drift(tmp_path) -> None:
     table = _sample_table()
     snapshot = tmp_path / "snapshot.parquet"
@@ -356,9 +341,6 @@ def test_verify_snapshot_detects_changed_values_with_the_same_shape(tmp_path) ->
         verify_snapshot(snapshot, manifest)
 
 
-# --------------------------------------------------------------------------- #
-# DuckDB golden round-trip (creds-free, real extraction)
-# --------------------------------------------------------------------------- #
 def _make_duckdb(tmp_path):
     import duckdb
 
@@ -440,9 +422,6 @@ def test_experiment_validate_flags_mutated_snapshot(tmp_path) -> None:
     assert any("Snapshot verification failed" in error for error in errors)
 
 
-# --------------------------------------------------------------------------- #
-# Proprietary adapters via fakes (wiring only, no live connection)
-# --------------------------------------------------------------------------- #
 def test_databricks_adapter_wiring(monkeypatch) -> None:
     table = _sample_table()
     captured: dict[str, str] = {}
@@ -505,9 +484,6 @@ def test_redshift_adapter_wiring(monkeypatch) -> None:
     assert result.num_rows == 2
 
 
-# --------------------------------------------------------------------------- #
-# Bundles
-# --------------------------------------------------------------------------- #
 def test_all_warehouses_have_bundles() -> None:
     types_present = {bundle.source_type for bundle in list_bundles()}
     assert {
@@ -533,9 +509,6 @@ def test_bundles_carry_no_inline_credentials() -> None:
                 assert not secret_pattern.search(str(text)), f"{bundle.source_type}: {text}"
 
 
-# --------------------------------------------------------------------------- #
-# Offline import guard
-# --------------------------------------------------------------------------- #
 def test_importing_sources_does_not_import_warehouse_clients(monkeypatch) -> None:
     for name in list(sys.modules):
         if name.startswith("model_finder.sources"):
@@ -552,9 +525,6 @@ def test_importing_sources_does_not_import_warehouse_clients(monkeypatch) -> Non
         assert client not in sys.modules, f"{client} imported at package import time"
 
 
-# --------------------------------------------------------------------------- #
-# CLI
-# --------------------------------------------------------------------------- #
 def test_cli_pull_reports_clean_error_on_nondeterministic_query(tmp_path) -> None:
     from model_finder.cli.main import main
 
@@ -595,9 +565,6 @@ def test_cli_pull_reports_clean_error_on_missing_postgres_uri(tmp_path) -> None:
     assert exit_code == 1
 
 
-# --------------------------------------------------------------------------- #
-# As-of validation
-# --------------------------------------------------------------------------- #
 def test_as_of_rejects_injection_garbage() -> None:
     with pytest.raises(ValueError, match="Invalid --as-of"):
         apply_as_of("SELECT * FROM t {as_of}", "snowflake", "2026' OR '1'='1")
@@ -614,9 +581,6 @@ def test_as_of_version_form_is_databricks_only() -> None:
         apply_as_of("SELECT * FROM t {as_of}", "snowflake", "v5")
 
 
-# --------------------------------------------------------------------------- #
-# Determinism: extra row-cap clauses + moving-time warning
-# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     "query",
     [
@@ -639,9 +603,6 @@ def test_moving_time_predicate_warns_without_raising() -> None:
         require_deterministic_query("SELECT * FROM t WHERE created_at > current_date - 7")
 
 
-# --------------------------------------------------------------------------- #
-# ADBC friendly-key -> option-namespace mapping
-# --------------------------------------------------------------------------- #
 def test_adbc_key_mapping_snowflake() -> None:
     out = _to_adbc_db_kwargs(
         "snowflake",

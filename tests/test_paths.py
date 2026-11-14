@@ -1,5 +1,3 @@
-"""Tests for ``model_finder.paths`` — canonical experiment output directories."""
-
 from __future__ import annotations
 
 import tempfile
