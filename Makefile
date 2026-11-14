@@ -56,7 +56,7 @@ boundaries:
 
 rules:
 	$(RUN) ast-grep test --skip-snapshot-tests
-	$(RUN) ast-grep scan --error
+	$(RUN) ast-grep scan --error . .agents
 
 deps:
 	$(RUN) deptry .

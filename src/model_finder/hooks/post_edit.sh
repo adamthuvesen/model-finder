@@ -16,8 +16,7 @@ IFS='
 '
 for file in $files; do
   [ -f "$file" ] || continue
-  # basedpyright skips dot-folders, so a skill with its own config is checked as a project,
-  # and only such a skill's extensionless `verify` script counts as Python.
+  # basedpyright skips dot-folders, so a skill with its own config is checked as a project.
   skill=""
   case "$file" in
     "$root"/.agents/skills/*/*)
@@ -27,7 +26,11 @@ for file in $files; do
       ;;
   esac
   kind="$file"
-  [ -n "$skill" ] && [ "$file" = "$skill/verify" ] && kind="$file.py"
+  case "$file" in
+    "$root"/.agents/skills/*/verify)
+      head -n 1 "$file" | grep -q python && kind="$file.py"
+      ;;
+  esac
   case "$kind" in
     *.py)
       if [ -x "$bin/ruff" ]; then

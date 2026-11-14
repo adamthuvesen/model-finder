@@ -488,7 +488,18 @@ def drive_wheel(ctx: Ctx) -> str:
         env,
     )
     require(not allowed.strip(), f"the Codex guard refused a plain ls: {allowed[:120]!r}")
-    return "the wheel installs offline; setup links skills and deny rules; the Codex guard refuses a holdout read"
+    (consumer / "results.json").write_text("[]")
+    edit = json.dumps({"tool_input": {"file_path": str(consumer / "results.json")}})
+    ctx.expect(
+        "post-edit",
+        ["sh", str(consumer / ".agents/hooks/post_edit.sh"), "claude"],
+        0,
+        "experiment rebuild-results",
+        consumer,
+        edit,
+        env,
+    )
+    return "the wheel installs offline; setup links skills, deny rules, and the post-edit hook; the Codex guard refuses a holdout read"
 
 
 @dataclass(frozen=True)
@@ -540,6 +551,8 @@ DRIVES = {
             "src/model_finder/cli/agent_rules.py",
             "src/model_finder/skills/**",
             "src/model_finder/contract/**",
+            "src/model_finder/hooks/**",
+            "src/model_finder/cli/hook.py",
             ".agents/hooks/**",
         ),
         drive_wheel,
