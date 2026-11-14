@@ -1,3 +1,6 @@
+# Every recipe line fails on its first failed command. macOS make 3.81 ignores .SHELLFLAGS.
+SHELL := /bin/bash -euo pipefail
+
 RUN := uv run --locked --extra models --extra deep
 
 # oauthlib and thrift are held back by databricks-sql-connector, which only the optional
@@ -73,4 +76,4 @@ secrets:
 
 vulnerabilities:
 	uv export --quiet --frozen --all-extras --all-groups --no-hashes --no-emit-project --output-file .audit-requirements.txt
-	$(RUN) pip-audit --requirement .audit-requirements.txt --no-deps --disable-pip --progress-spinner off $(REVIEWED_VULNS); status=$$?; rm -f .audit-requirements.txt; exit $$status
+	$(RUN) pip-audit --requirement .audit-requirements.txt --no-deps --disable-pip --progress-spinner off $(REVIEWED_VULNS) || status=$$?; rm -f .audit-requirements.txt; exit $${status:-0}

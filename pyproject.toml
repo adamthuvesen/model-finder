@@ -116,7 +116,7 @@ model_finder = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --strict-markers"
 
 [tool.ruff]
 line-length = 100

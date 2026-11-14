@@ -6,6 +6,7 @@ from __future__ import annotations
 import atexit
 import hashlib
 import json
+import os
 import re
 import shutil
 import signal
@@ -35,7 +36,11 @@ from drives import (
     kill_group,
 )
 
-REAL_STORE = Path.home() / ".local" / "share" / "model-finder"
+# The same rule as model_finder.ledger._data_home, so the tripwire watches the store the engine writes.
+_XDG_DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", ""))
+REAL_STORE = (
+    _XDG_DATA_HOME if _XDG_DATA_HOME.is_absolute() else Path.home() / ".local" / "share"
+) / "model-finder"
 REAL_SOURCES = Path.home() / ".config" / "model-finder" / "sources.json"
 TRIPWIRE_TOOLS = ("claude", "codex", "cursor-agent", "modal", "launchctl", "brew", "op")
 
