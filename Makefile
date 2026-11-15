@@ -3,10 +3,6 @@ SHELL := /bin/bash -euo pipefail
 
 RUN := uv run --locked --extra models --extra deep
 
-# oauthlib and thrift are held back by databricks-sql-connector, which only the optional
-# `databricks` extra installs. Remove these when the connector allows the fixed versions.
-REVIEWED_VULNS := --ignore-vuln CVE-2026-49272 --ignore-vuln PYSEC-2026-4114 --ignore-vuln PYSEC-2026-3925 --ignore-vuln PYSEC-2026-3926 --ignore-vuln PYSEC-2026-3927
-
 .PHONY: setup quick check fix slow verify audit lock lint types boundaries rules deps dead test workflows secrets vulnerabilities
 
 # After a clone or a lockfile change. CI runs the same command.
@@ -76,4 +72,4 @@ secrets:
 
 vulnerabilities:
 	uv export --quiet --frozen --all-extras --all-groups --no-hashes --no-emit-project --output-file .audit-requirements.txt
-	$(RUN) pip-audit --requirement .audit-requirements.txt --no-deps --disable-pip --progress-spinner off $(REVIEWED_VULNS) || status=$$?; rm -f .audit-requirements.txt; exit $${status:-0}
+	$(RUN) pip-audit --requirement .audit-requirements.txt --no-deps --disable-pip --progress-spinner off || status=$$?; rm -f .audit-requirements.txt; exit $${status:-0}
