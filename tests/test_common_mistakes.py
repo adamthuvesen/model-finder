@@ -67,6 +67,12 @@ def test_metrics_refuse_non_finite_predictions(scores, bad) -> None:
         scores(target, np.array([bad, 0.1, 0.8, 0.9]))
 
 
+def test_auc_keeps_integer_scores_exact() -> None:
+    target = pd.Series([0.0, 1.0], name="label")
+    assert classification_scores(target, np.array([2**53, 2**53 + 1])) == {"auc": 1.0}
+    assert classification_scores(target, np.array(["2", "10"])) == {"auc": 1.0}
+
+
 def test_auc_refuses_labels_that_are_not_binary() -> None:
     with pytest.raises(ValueError, match=r"label.*not 0 and 1.*Fix:"):
         classification_scores(pd.Series([0.0, 1.0, 2.0], name="label"), np.array([0.1, 0.5, 0.9]))

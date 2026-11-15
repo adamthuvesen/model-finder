@@ -19,7 +19,10 @@ def _labels(target: pd.Series) -> np.ndarray:
 
 def _predictions(target: pd.Series, predictions: np.ndarray) -> np.ndarray:
     """Refuse non-finite predictions: ranking drops NaN, so an unscored row would still yield an AUC."""
-    values = np.asarray(predictions, dtype=float)
+    values = np.asarray(predictions)
+    if values.dtype.kind in "iub":
+        return values
+    values = values.astype(float)
     bad = int((~np.isfinite(values)).sum())
     if bad:
         raise ValueError(
@@ -53,5 +56,5 @@ def classification_scores(target: pd.Series, scores: np.ndarray) -> dict[str, fl
 
 
 def regression_scores(target: pd.Series, predictions: np.ndarray) -> dict[str, float]:
-    errors = _labels(target) - _predictions(target, predictions)
+    errors = _labels(target) - _predictions(target, predictions).astype(float)
     return {"rmse": float(np.sqrt((errors**2).mean())), "mae": float(np.abs(errors).mean())}
