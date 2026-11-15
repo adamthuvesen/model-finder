@@ -70,6 +70,7 @@ def test_metrics_refuse_non_finite_predictions(scores, bad) -> None:
 def test_auc_keeps_integer_scores_exact() -> None:
     target = pd.Series([0.0, 1.0], name="label")
     assert classification_scores(target, np.array([2**53, 2**53 + 1])) == {"auc": 1.0}
+    assert classification_scores(target, np.array(["2", "10"])) == {"auc": 1.0}
 
 
 def test_auc_refuses_labels_that_are_not_binary() -> None:

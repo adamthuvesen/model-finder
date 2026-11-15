@@ -22,7 +22,8 @@ def _predictions(target: pd.Series, predictions: np.ndarray) -> np.ndarray:
     values = np.asarray(predictions)
     if values.dtype.kind in "iub":
         return values
-    bad = int((~np.isfinite(values.astype(float))).sum())
+    values = values.astype(float)
+    bad = int((~np.isfinite(values)).sum())
     if bad:
         raise ValueError(
             f"{bad} of {values.size} predictions for column {target.name} are NaN or infinite. "
