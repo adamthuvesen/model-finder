@@ -61,21 +61,6 @@ def _mkdir_p(path: Path) -> Path:
     return path
 
 
-def outputs_dir(experiment_dir: Path) -> Path:
-    """Return ``experiment_dir/outputs``, creating it if needed."""
-    return _mkdir_p(experiment_dir / OUTPUTS_DIRNAME)
-
-
-def work_dir(experiment_dir: Path) -> Path:
-    """Return ``experiment_dir/work``, creating it if needed."""
-    return _mkdir_p(experiment_dir / WORK_DIRNAME)
-
-
-def scripts_dir(experiment_dir: Path) -> Path:
-    """Return ``experiment_dir/scripts``, creating it if needed."""
-    return _mkdir_p(experiment_dir / SCRIPTS_DIRNAME)
-
-
 def data_dir(experiment_dir: Path) -> Path:
     """Return ``experiment_dir/data``, creating it if needed."""
     return _mkdir_p(experiment_dir / DATA_DIRNAME)

@@ -6,8 +6,7 @@ from demos.common import CODE_ROOT
 from demos.demo_bootstrap.data import TARGET_COLUMN, TIME_COLUMN
 from demos.demo_bootstrap.generate_data import generate_demo_bootstrap_dataset
 from demos.demo_bootstrap.modeling import CANDIDATE_RUNNERS
-from model_finder.cli.runner import RunnerConfig, run_runner_main
-from model_finder.runner import ExperimentSeed
+from model_finder.api import ExperimentSeed, RunnerConfig, run_runner_main
 
 _HERE = Path(__file__).resolve().parent
 

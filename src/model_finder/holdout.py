@@ -103,9 +103,13 @@ def history_seals(experiment_dir: Path) -> list[str]:
     ]
 
 
+def is_sealed(experiment_dir: Path) -> bool:
+    return (experiment_dir / HOLDOUT_SEAL_FILE_NAME).is_file()
+
+
 def consumed_holdout_count(experiment_dir: Path) -> int:
     """Count retired holdouts from the ledger, so workspace edits cannot change the answer."""
-    if not (experiment_dir / HOLDOUT_SEAL_FILE_NAME).is_file():
+    if not is_sealed(experiment_dir):
         return 0
     return retired_count(read_holdout_seal(experiment_dir).experiment_uid)
 
@@ -116,7 +120,7 @@ def seal_holdout(experiment_dir: Path, search: SearchSplits, holdout: HoldoutSpl
     if holdout.holdout.empty or search.train.empty or search.validation.empty:
         raise ValueError("a split is empty. Fix: use more rows, or change the split fractions")
     with store_lock():
-        if record_path.exists():
+        if is_sealed(experiment_dir):
             raise ValueError(
                 f"{record_path}: already sealed. Fix: add rows with `experiment reseal`"
             )
@@ -202,9 +206,7 @@ def holdout_read_labels(experiment_dir: Path, seal: HoldoutSeal) -> list[str]:
 
 def load_search_splits(experiment_dir: Path) -> SearchSplits:
     rows_dir = experiment_dir / DATA_DIRNAME
-    if (rows_dir / SNAPSHOT_FILE_NAME).exists() and (
-        experiment_dir / HOLDOUT_SEAL_FILE_NAME
-    ).exists():
+    if (rows_dir / SNAPSHOT_FILE_NAME).exists() and is_sealed(experiment_dir):
         raise ValueError(
             f"{rows_dir / SNAPSHOT_FILE_NAME}: A full snapshot sits beside a seal. "
             "Fix: run `experiment seal` to finish it"

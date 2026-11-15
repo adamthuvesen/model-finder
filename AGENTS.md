@@ -5,6 +5,8 @@ The client owns continuation. This repo owns the evidence: search rows, a sealed
 run records, and a completion check. Docs: [architecture](.agents/docs/architecture.md),
 [labels and limits](docs/evidence.md), [why native goals](.agents/docs/decisions/native-goals.md).
 
+Domain terms are in `GLOSSARY.md`. A change that adds, renames, or redefines a term updates it in the same commit.
+
 ## Where things go
 
 | Task | File |
@@ -16,6 +18,7 @@ run records, and a completion check. Docs: [architecture](.agents/docs/architect
 | A label or an exploratory reason | `labels.py` |
 | Freeze and evaluate | `final_evaluation.py` |
 | Reseal, or rebuild the leaderboard | `reseal.py`, `rebuild.py` |
+| A name experiment code imports | `api.py`. Consumers import only from there |
 | Skills and documents shipped in the wheel | `src/model_finder/skills/`, `contract/` |
 
 ## Commands
@@ -78,5 +81,7 @@ Cite each check as `path::name`. `tests/test_agents_table.py` fails unless that 
 | A holdout score cannot enter search metrics by name | `src/model_finder/candidate_result.py::SearchMetrics`, `src/model_finder/candidate_result.py::names_holdout` | A neutral name such as `q4_auc` passes |
 | A reported gap and interval match the metrics | `src/model_finder/candidate_result.py::_gap_matches_metrics`, `src/model_finder/candidate_result.py::_interval_declares_bootstrap_count` | Only when reported |
 | CLI above domain above I/O, and the engine never imports demos | `pyproject.toml::tool.importlinter.contracts.engine-layers`, `pyproject.toml::tool.importlinter.contracts.engine-independent-of-demos` | Imports only |
+| No company name in the engine | `tests/test_no_company_names.py::test_no_company_name_in_src_or_tests` | `src/` and `tests/` only, and one name: `menti` or `mentimeter`, in any case, as its own word |
 | A verify pass needs a control that observes FAIL | `.agents/skills/verify-model-finder/verify::run_control` | One drive's exit-code check |
 | A skipped, xfailed, or xpassed test fails the run | `tests/conftest.py::pytest_sessionfinish` | None |
+| Tests do not sleep or read the clock, and every skip or xfail gives a reason | `tests/ruff.toml::lint.flake8-tidy-imports.banned-api`, `tests/test_strict_mode.py::test_every_skip_gives_a_reason` | Only the calls in the banned-api table. A reason held in a variable passes |

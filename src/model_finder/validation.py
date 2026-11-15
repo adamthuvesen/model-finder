@@ -15,7 +15,7 @@ from model_finder.candidate_result import (
     metric_key,
     train_validation_gap,
 )
-from model_finder.holdout import TRAIN_FILE_NAME, consumed_holdout_count
+from model_finder.holdout import TRAIN_FILE_NAME, consumed_holdout_count, is_sealed
 from model_finder.paths import (
     DATA_DIRNAME,
     HOLDOUT_SEAL_FILE_NAME,
@@ -90,7 +90,7 @@ def stray_root_entries(experiment_dir: Path) -> list[str]:
 def _snapshot_errors(experiment_dir: Path) -> list[str]:
     snapshot_path = experiment_dir / DATA_DIRNAME / SNAPSHOT_FILENAME
     manifest_path = experiment_dir / DATA_DIRNAME / MANIFEST_FILENAME
-    if snapshot_path.exists() and (experiment_dir / HOLDOUT_SEAL_FILE_NAME).exists():
+    if snapshot_path.exists() and is_sealed(experiment_dir):
         return [
             "data/snapshot.parquet sits beside a seal and may hold sealed rows. Run `experiment seal`."
         ]
@@ -196,17 +196,13 @@ def validate_experiment(experiment_dir: Path, *, strict_completion: bool = False
             f"Run `experiment rebuild-results {experiment_dir}`.",
         ]
     retired = consumed_holdout_count(experiment_dir)
-    if retired and not (experiment_dir / HOLDOUT_SEAL_FILE_NAME).exists():
-        messages.append(
-            "Holdout history exists but the seal is missing. Restore holdout_seal.json."
-        )
     if retired:
         messages.append(
             f"warning: {retired} holdouts retired. Their final metrics are exploratory, "
             "and selection after reading them is holdout-informed."
         )
     has_search_rows = (experiment_dir / DATA_DIRNAME / TRAIN_FILE_NAME).is_file()
-    if has_search_rows and not (experiment_dir / HOLDOUT_SEAL_FILE_NAME).exists():
+    if has_search_rows and not is_sealed(experiment_dir):
         messages.append(NO_HOLDOUT_WARNING)
     if strict_completion and not results:
         messages.append("strict completion requires at least one result entry")

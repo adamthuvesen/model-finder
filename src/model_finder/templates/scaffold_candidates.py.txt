@@ -8,8 +8,7 @@ Add one with `experiment candidate new <name>`, or write a function here.
 import numpy as np
 import pandas as pd
 
-from model_finder.candidates import Candidates, Predict, Scoring
-from model_finder.splits import SearchSplits
+from model_finder.api import Candidates, Predict, Scoring, SearchSplits
 
 # CHANGE: the column to predict.
 TARGET = __TARGET__

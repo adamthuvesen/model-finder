@@ -25,23 +25,17 @@ from model_finder.completion import (
     save_completion,
     write_review,
 )
-from model_finder.feature_provenance import validate_feature_provenance
-from model_finder.holdout import load_search_splits
+from model_finder.feature_provenance import validate_for_experiment
+from model_finder.holdout import is_sealed, load_search_splits
 from model_finder.labels import leaderboard_label
 from model_finder.paths import (
     DATA_DIRNAME,
-    HOLDOUT_SEAL_FILE_NAME,
     require_experiment_dir,
 )
 from model_finder.rebuild import rebuild_results
 from model_finder.reseal import reseal_holdout
 from model_finder.results import load_results, ranked_results
 from model_finder.sources.adapters import SUPPORTED_SOURCE_TYPES
-from model_finder.sources.query import (
-    apply_as_of,
-    require_deterministic_query,
-    require_read_only_query,
-)
 from model_finder.sources.registry import (
     bundle_problems,
     enable_source,
@@ -54,6 +48,7 @@ from model_finder.sources.snapshot import (
     SNAPSHOT_FILENAME,
     SnapshotFreezeRequest,
     freeze_snapshot,
+    plan_snapshot,
     seal_snapshot,
     split_snapshot_without_holdout,
 )
@@ -229,22 +224,9 @@ def _contract(args: argparse.Namespace) -> int:
     return 0
 
 
-def _row_dates(rows: pd.DataFrame, time_column: str) -> set[str]:
-    return {str(date) for date in pd.DatetimeIndex(rows[time_column]).strftime("%Y-%m-%d")}
-
-
 def _check_features(args: argparse.Namespace) -> int:
-    search = load_search_splits(Path(args.experiment))
-    if args.time_column not in search.train.columns:
-        raise ValueError(
-            f"Time column is missing from search rows: {args.time_column}. "
-            f"Fix: use one of: {', '.join(str(column) for column in search.train.columns)}"
-        )
-    validate_feature_provenance(
-        Path(args.artifact),
-        selection_train_dates=_row_dates(search.train, args.time_column),
-        validation_dates=_row_dates(search.validation, args.time_column),
-        test_dates=(),
+    validate_for_experiment(
+        Path(args.artifact), load_search_splits(Path(args.experiment)), args.time_column
     )
     print(f"Feature provenance holds: {args.artifact}")
     return 0
@@ -297,7 +279,7 @@ def _pull_config(args: argparse.Namespace) -> dict[str, object]:
 
 def _pull(args: argparse.Namespace) -> int:
     experiment_dir = Path(args.experiment).resolve()
-    if (experiment_dir / HOLDOUT_SEAL_FILE_NAME).exists():
+    if is_sealed(experiment_dir):
         raise ValueError(
             f"{experiment_dir}: This experiment is sealed, and a pull here would put holdout rows "
             "back in the workspace. Fix: pull new rows into another directory, then run "
@@ -308,27 +290,22 @@ def _pull(args: argparse.Namespace) -> int:
     nondeterministic_reason = override_reason(
         "--allow-nondeterministic", allowed=args.allow_nondeterministic, reason=args.reason
     )
+    request = SnapshotFreezeRequest(
+        source_type=args.source,
+        query=query,
+        out_dir=rows_dir,
+        config=_pull_config(args),
+        as_of=args.as_of,
+        sample_seed=args.sample_seed,
+        nondeterministic_reason=nondeterministic_reason,
+    )
     if args.dry_run:
-        require_read_only_query(query, args.source)
-        require_deterministic_query(
-            query, dialect=args.source, allow_nondeterministic=args.allow_nondeterministic
-        )
-        rewritten, recorded = apply_as_of(query, args.source, args.as_of)
+        rewritten, recorded = plan_snapshot(request)
         print(f"[dry-run] source={args.source} experiment={experiment_dir.name} as_of={recorded}")
         print(f"[dry-run] would write {rows_dir / SNAPSHOT_FILENAME}")
         print(f"[dry-run] query:\n{rewritten}")
         return 0
-    manifest = freeze_snapshot(
-        SnapshotFreezeRequest(
-            source_type=args.source,
-            query=query,
-            out_dir=rows_dir,
-            config=_pull_config(args),
-            as_of=args.as_of,
-            sample_seed=args.sample_seed,
-            nondeterministic_reason=nondeterministic_reason,
-        )
-    )
+    manifest = freeze_snapshot(request)
     print(
         f"Wrote {manifest.row_count} rows x {manifest.column_count} cols "
         f"-> {rows_dir / manifest.snapshot_filename}"

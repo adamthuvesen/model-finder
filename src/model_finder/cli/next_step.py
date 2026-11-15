@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from model_finder.completion import assess_completion
+from model_finder.holdout import is_sealed
 from model_finder.paths import (
     ATTEMPT_PATH,
     COMPLETION_PATH,
     FINAL_PATH,
-    HOLDOUT_SEAL_FILE_NAME,
     MODEL_DIRNAME,
     RUNNER_COMMAND_PATH,
     SELECTION_PATH,
@@ -58,7 +58,7 @@ def _search_steps(
 ) -> list[Step]:
     """Suggest what fits once there are results. Search stays open in any order."""
     best = ranked_results(load_results(experiment_dir))[0].candidate_id
-    has_seal = (experiment_dir / HOLDOUT_SEAL_FILE_NAME).is_file()
+    has_seal = is_sealed(experiment_dir)
     if (experiment_dir / MODEL_DIRNAME / "candidates.py").is_file():
         name = _unused_candidate_name(experiment_dir)
         another = Step(

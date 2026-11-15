@@ -11,7 +11,8 @@ import re
 import warnings
 
 import sqlglot
-from sqlglot import exp
+from sqlglot import Token, TokenType, exp
+from sqlglot.dialects.dialect import Dialect
 from sqlglot.errors import SqlglotError
 
 from model_finder.sources.errors import NonDeterministicQueryError, ReadOnlyQueryError
@@ -88,6 +89,29 @@ _WRITE_NODES = (
     exp.Lock,
     exp.NextValueFor,
 )
+# sqlglot reads some writes as reads. Snowflake runs `->>` as a flow operator that starts a second
+# statement, and T-SQL needs no semicolon between statements. sqlglot reads the DELETE in
+# `SELECT 1 ->> DELETE FROM t` and `SELECT 1 DELETE FROM t` as a column or an alias, so tokens
+# get checked too: `->>` needs a literal after it (its JSON use), and a bare statement keyword
+# is refused anywhere. A column with such a name needs quotes or a table qualifier.
+_STATEMENT_KEYWORDS = frozenset(
+    {
+        "ALTER",
+        "CALL",
+        "CREATE",
+        "DELETE",
+        "DROP",
+        "EXEC",
+        "EXECUTE",
+        "GRANT",
+        "INSERT",
+        "MERGE",
+        "REVOKE",
+        "TRUNCATE",
+        "UPDATE",
+    }
+)
+_CHAINING_OPERATORS = (TokenType.ARROW, TokenType.PIPE_GT)
 # sqlglot raises these on some malformed input instead of ParseError.
 _PARSER_CRASHES = (IndexError, KeyError, AttributeError, TypeError, RecursionError)
 
@@ -180,6 +204,55 @@ def _parse_one_query(query: str, dialect: str | None) -> exp.Query:
     return statements[0]
 
 
+def _is_quoted(token: Token) -> bool:
+    name = token.token_type.name
+    return name in {"IDENTIFIER", "STRING"} or name.endswith("_STRING")
+
+
+def _is_literal(token: Token) -> bool:
+    return token.token_type == TokenType.NUMBER or (
+        _is_quoted(token) and token.token_type != TokenType.IDENTIFIER
+    )
+
+
+def _is_statement_keyword(token: Token) -> bool:
+    return not _is_quoted(token) and token.text.upper() in _STATEMENT_KEYWORDS
+
+
+def _is_bare_keyword(tokens: list[Token], index: int) -> bool:
+    """Tell a statement keyword from a function such as `INSERT(` or a name after `t.`."""
+    previous = tokens[index - 1] if index else None
+    following = tokens[index + 1] if index + 1 < len(tokens) else None
+    return (
+        _is_statement_keyword(tokens[index])
+        and (previous is None or previous.token_type != TokenType.DOT)
+        and (following is None or following.token_type != TokenType.L_PAREN)
+    )
+
+
+def _require_no_hidden_statement(query: str, dialect: str) -> None:
+    tokens = Dialect.get_or_raise(dialect).tokenize(query.replace(_AS_OF_PLACEHOLDER, ""))
+    for index, token in enumerate(tokens):
+        following = tokens[index + 1] if index + 1 < len(tokens) else None
+        if token.token_type == TokenType.DARROW and not (following and _is_literal(following)):
+            raise ReadOnlyQueryError(
+                "Query uses ->> without a literal after it, which Snowflake runs as a second "
+                "statement. Fix: use ->> only as JSON extract with a literal key, such as col ->> 'key'"
+            )
+        if (
+            token.token_type in _CHAINING_OPERATORS
+            and following
+            and _is_statement_keyword(following)
+        ):
+            raise ReadOnlyQueryError(
+                f"Query chains {following.text.upper()} with {token.text}. Fix: pulls are read-only, so remove it"
+            )
+        if _is_bare_keyword(tokens, index):
+            raise ReadOnlyQueryError(
+                f"Query has a bare {token.text.upper()}. Fix: quote it if it is a column, or remove the write"
+            )
+
+
 def require_read_only_query(query: str, dialect: str) -> None:
     """Refuse a write in the warehouse's own dialect. No flag turns this off.
 
@@ -191,6 +264,7 @@ def require_read_only_query(query: str, dialect: str) -> None:
     if _NESTED_COMMENT.search(query):
         raise ReadOnlyQueryError("Query contains a nested block comment. Fix: remove it")
     tree = _parse_one_query(query, dialect)
+    _require_no_hidden_statement(query, dialect)
     write = tree.find(*_WRITE_NODES)
     if write is not None:
         raise ReadOnlyQueryError(

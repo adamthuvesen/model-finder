@@ -18,13 +18,14 @@ from model_finder.holdout import (
     TRAIN_FILE_NAME,
     VALIDATION_FILE_NAME,
     HoldoutSeal,
+    is_sealed,
     read_holdout_seal,
     seal_holdout,
     verify_sealed_holdout,
     write_search_rows,
 )
 from model_finder.io import file_sha256
-from model_finder.paths import DATA_DIRNAME, HOLDOUT_SEAL_FILE_NAME
+from model_finder.paths import DATA_DIRNAME
 from model_finder.sources.errors import SourceError, SourceExtractionError
 from model_finder.sources.extractor import WarehouseExtractor, get_extractor
 from model_finder.sources.manifest import (
@@ -58,6 +59,17 @@ class SnapshotFreezeRequest:
     extractor: WarehouseExtractor | None = None
 
 
+def plan_snapshot(request: SnapshotFreezeRequest) -> tuple[str, str | None]:
+    """Guard the query and apply the as-of. Returns ``(rewritten_query, recorded_as_of)``."""
+    require_read_only_query(request.query, request.source_type)
+    require_deterministic_query(
+        request.query,
+        dialect=request.source_type,
+        allow_nondeterministic=request.nondeterministic_reason is not None,
+    )
+    return apply_as_of(request.query, request.source_type, request.as_of)
+
+
 def freeze_snapshot(request: SnapshotFreezeRequest) -> DatasetManifest:
     """Extract *query* read-only and freeze it under *out_dir*.
 
@@ -65,13 +77,7 @@ def freeze_snapshot(request: SnapshotFreezeRequest) -> DatasetManifest:
     pre-built or fake adapter (used in tests); otherwise one is built from
     *source_type* and *config*.
     """
-    require_read_only_query(request.query, request.source_type)
-    require_deterministic_query(
-        request.query,
-        dialect=request.source_type,
-        allow_nondeterministic=request.nondeterministic_reason is not None,
-    )
-    rewritten_query, recorded_as_of = apply_as_of(request.query, request.source_type, request.as_of)
+    rewritten_query, recorded_as_of = plan_snapshot(request)
 
     extractor = request.extractor or get_extractor(request.source_type, request.config)
     try:
@@ -129,7 +135,7 @@ def seal_snapshot(
     finishes the removal, because the record proves the rows are already sealed.
     """
     snapshot = experiment_dir / DATA_DIRNAME / SNAPSHOT_FILENAME
-    if (experiment_dir / HOLDOUT_SEAL_FILE_NAME).exists():
+    if is_sealed(experiment_dir):
         seal = read_holdout_seal(experiment_dir)
         verify_sealed_holdout(seal)
         rows_dir = experiment_dir / DATA_DIRNAME

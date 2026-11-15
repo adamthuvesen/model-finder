@@ -9,7 +9,7 @@ import pandas as pd
 
 from demos.demo_bootstrap.__main__ import CONFIG
 from model_finder.cli.main import main as experiment_main
-from model_finder.cli.runner import run_runner_main
+from model_finder.cli.runner_main import run_runner_main
 
 
 def _demo(*arguments: str) -> int:

@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 from model_finder.cli.main import main
-from model_finder.cli.runner import RunnerConfig, run_runner_main
+from model_finder.cli.runner_main import RunnerConfig, run_runner_main
 from model_finder.runner import ExperimentSeed
 from tests.conftest import SPEC, candidate_result, fitted, rows
 from tests.test_usable_defaults import quick_runner

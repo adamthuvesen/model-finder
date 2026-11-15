@@ -7,12 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from model_finder.final_evaluation import FinalEvaluation
-from model_finder.holdout import holdout_read_labels, read_holdout_seal
+from model_finder.holdout import holdout_read_labels, is_sealed, read_holdout_seal
 from model_finder.io import read_text
 from model_finder.ledger import entries_for
 from model_finder.paths import (
     DATA_DIRNAME,
-    HOLDOUT_SEAL_FILE_NAME,
     REBUILDS_PATH,
     repository_relative_path,
 )
@@ -44,7 +43,7 @@ def evidence_labels(experiment_dir: Path) -> list[str]:
 
 def leaderboard_label(experiment_dir: Path) -> str | None:
     """Return one short line when the leaderboard's scores are exploratory."""
-    if not (experiment_dir / HOLDOUT_SEAL_FILE_NAME).is_file():
+    if not is_sealed(experiment_dir):
         return "Exploratory: no holdout is sealed."
     if evidence_labels(experiment_dir):
         return "Exploratory: an override changed this work's data or results."

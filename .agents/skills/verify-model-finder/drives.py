@@ -509,7 +509,7 @@ DRIVES = {
         "A demo seals its holdout away from search rows and reads it once, after a freeze",
         (
             "src/model_finder/*.py",
-            "src/model_finder/cli/runner.py",
+            "src/model_finder/cli/runner_main.py",
             "src/model_finder/cli/errors.py",
             "demos/**",
         ),

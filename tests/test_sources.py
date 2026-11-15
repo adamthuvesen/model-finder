@@ -39,7 +39,7 @@ from model_finder.sources.adapters import (
     RedshiftExtractor,
     _to_adbc_db_kwargs,
 )
-from model_finder.sources.errors import SourceError
+from model_finder.sources.errors import ReadOnlyQueryError, SourceError
 from model_finder.sources.query import require_read_only_query
 from model_finder.validation import validate_experiment
 
@@ -166,6 +166,18 @@ def test_ranking_with_order_is_deterministic() -> None:
 def test_writes_are_refused_with_no_override(query: str, dialect: str) -> None:
     with pytest.raises(SourceError):
         require_read_only_query(query, dialect)
+
+
+@pytest.mark.parametrize("dialect", ["snowflake", "postgres"])
+@pytest.mark.parametrize("query", ["SELECT 1 ->> DELETE FROM t", "SELECT 1 DELETE FROM t"])
+def test_writes_the_parser_reads_as_reads_are_refused(query: str, dialect: str) -> None:
+    with pytest.raises(ReadOnlyQueryError, match="Fix:"):
+        require_read_only_query(query, dialect)
+
+
+@pytest.mark.parametrize("dialect", ["snowflake", "postgres"])
+def test_json_extract_with_a_literal_key_passes(dialect: str) -> None:
+    require_read_only_query("SELECT col ->> 'key' AS v FROM t", dialect)
 
 
 def test_allow_nondeterministic_does_not_allow_writes(tmp_path) -> None:

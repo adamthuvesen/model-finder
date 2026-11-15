@@ -15,6 +15,7 @@ from model_finder.holdout import (
     check_replacement_rows,
     commit_seal,
     history_seals,
+    is_sealed,
     place_staged_file,
     read_holdout_seal,
     remove_other_sealed_files,
@@ -26,7 +27,6 @@ from model_finder.paths import (
     ATTEMPT_PATH,
     FINAL_PATH,
     HOLDOUT_HISTORY_DIR,
-    HOLDOUT_SEAL_FILE_NAME,
     SELECTION_PATH,
     repository_relative_path,
     require_experiment_dir,
@@ -70,7 +70,7 @@ def reseal_holdout(experiment_dir: Path, rows: pd.DataFrame, provenance_note: st
     require_experiment_dir(experiment_dir)
     with results_lock(experiment_dir):
         check_replacement_rows(experiment_dir, rows)
-        if not (experiment_dir / HOLDOUT_SEAL_FILE_NAME).is_file():
+        if not is_sealed(experiment_dir):
             seal, staged = stage_replacement_rows(experiment_dir, str(uuid4()), rows)
             place_staged_file(seal, staged)
             commit_seal(experiment_dir, seal)

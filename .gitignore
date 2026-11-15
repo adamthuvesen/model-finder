@@ -14,9 +14,6 @@ build/
 dist/
 *.egg-info/
 
-# The committed replay lives under examples/ instead.
-experiments/**/outputs/replay.html
-
 # Runtime artifacts
 experiments/**/*.lock
 experiments/**/status.md

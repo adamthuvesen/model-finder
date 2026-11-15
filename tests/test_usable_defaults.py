@@ -13,7 +13,7 @@ from model_finder.candidate_result import (
     SearchMetrics,
 )
 from model_finder.cli.main import main
-from model_finder.cli.runner import RunnerConfig, run_runner_main
+from model_finder.cli.runner_main import RunnerConfig, run_runner_main
 from model_finder.ledger import read_ledger
 from model_finder.runner import ExperimentSeed
 from model_finder.splits import SearchSplits

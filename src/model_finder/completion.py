@@ -10,13 +10,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from model_finder.final_evaluation import load_verified_final
-from model_finder.holdout import holdout_read_labels, read_holdout_seal
+from model_finder.holdout import holdout_read_labels, is_sealed, read_holdout_seal
 from model_finder.io import read_text, write_json
 from model_finder.labels import assess_final, evidence_labels
 from model_finder.paths import (
     COMPLETION_PATH,
     FINAL_PATH,
-    HOLDOUT_SEAL_FILE_NAME,
     REVIEW_PATH,
     SPECIFICATION_FILE_NAME,
 )
@@ -189,7 +188,7 @@ def _check_final(experiment_dir: Path, record: CompletionRecord, status: Complet
                 "Say why that is acceptable with --acknowledged-overlap <text>."
             )
         return
-    if not (experiment_dir / HOLDOUT_SEAL_FILE_NAME).is_file():
+    if not is_sealed(experiment_dir):
         status.exploratory.append("No holdout was sealed. Scores come from validation rows.")
         return
     status.exploratory.append("A holdout is sealed, but no final evaluation is on record.")

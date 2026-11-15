@@ -30,6 +30,7 @@ from model_finder.sources.registry import Bundle, get_bundle, list_bundles
 from model_finder.sources.snapshot import (
     SnapshotFreezeRequest,
     freeze_snapshot,
+    plan_snapshot,
     read_snapshot,
     seal_snapshot,
 )
@@ -53,6 +54,7 @@ __all__ = [
     "get_bundle",
     "get_extractor",
     "list_bundles",
+    "plan_snapshot",
     "read_snapshot",
     "require_deterministic_query",
     "seal_snapshot",

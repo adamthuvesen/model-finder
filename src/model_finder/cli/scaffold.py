@@ -13,12 +13,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from model_finder.cli.runner import RunnerConfig, initialize_experiment
-from model_finder.holdout import read_holdout_seal
+from model_finder.cli.runner_main import RunnerConfig, initialize_experiment
+from model_finder.holdout import is_sealed, read_holdout_seal
 from model_finder.io import write_text
 from model_finder.ledger import store_root
 from model_finder.paths import (
-    HOLDOUT_SEAL_FILE_NAME,
     MODEL_DIRNAME,
     RUNNER_COMMAND_PATH,
     SPECIFICATION_FILE_NAME,
@@ -148,8 +147,7 @@ def _write_code(
 
 def _remove_partial_experiment(experiment_dir: Path) -> None:
     """A failed `new` leaves nothing, so the same command works after the fix."""
-    seal_path = experiment_dir / HOLDOUT_SEAL_FILE_NAME
-    if seal_path.is_file():
+    if is_sealed(experiment_dir):
         shutil.rmtree(
             store_root() / read_holdout_seal(experiment_dir).experiment_uid, ignore_errors=True
         )

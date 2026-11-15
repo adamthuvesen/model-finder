@@ -13,7 +13,7 @@ import pytest
 
 from model_finder.cli.main import main
 from model_finder.cli.next_step import next_steps
-from model_finder.cli.runner import run_runner_main
+from model_finder.cli.runner_main import run_runner_main
 from model_finder.cli.scaffold import load_runner
 
 ROOT = Path(__file__).parents[2]

@@ -21,9 +21,13 @@ from demos.demo_bootstrap.data import (
     TARGET_COLUMN,
     feature_columns,
 )
-from model_finder.candidate_result import CandidateRunner, FittedCandidate
-from model_finder.candidates import Scoring, scored_candidate
-from model_finder.splits import SearchSplits
+from model_finder.api import (
+    CandidateRunner,
+    FittedCandidate,
+    Scoring,
+    SearchSplits,
+    scored_candidate,
+)
 
 SCORING = Scoring(TARGET_COLUMN, "val_auc", classification_metrics)
 _LOGREG_PARAMS: dict[str, Any] = {"max_iter": 500, "random_state": RANDOM_STATE, "solver": "lbfgs"}

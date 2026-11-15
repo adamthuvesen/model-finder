@@ -4,8 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from model_finder.cli.runner import RunnerConfig, run_runner_main
-from model_finder.runner import ExperimentSeed
+from model_finder.api import ExperimentSeed, RunnerConfig, run_runner_main
 
 HERE = Path(__file__).resolve().parent
 # CHANGE: load rows from anywhere in `rows_loader`.

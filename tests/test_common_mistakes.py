@@ -18,7 +18,7 @@ from model_finder.cli.errors import run_reporting_errors
 from model_finder.cli.hook import edited_files, report
 from model_finder.cli.main import main
 from model_finder.cli.next_step import next_steps
-from model_finder.cli.runner import run_runner_main
+from model_finder.cli.runner_main import run_runner_main
 from model_finder.cli.scaffold import load_runner
 from model_finder.metrics import classification_scores, regression_scores
 from model_finder.sources import adapters, registry

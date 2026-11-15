@@ -132,34 +132,34 @@ ignore = ["E501", "TRY003", "PLR2004", "PLR0913", "PLR0917", "ANN401"]
 "openai".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
 "litellm".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
 "langchain".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
-"subprocess".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"multiprocessing".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"concurrent.futures.ProcessPoolExecutor".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"concurrent.futures.process".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"pty".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"asyncio".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.system".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.popen".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.fork".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.forkpty".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.posix_spawn".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.posix_spawnp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.execl".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.execle".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.execlp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.execlpe".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.execv".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.execve".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.execvp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.execvpe".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.spawnl".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.spawnle".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.spawnlp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.spawnlpe".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.spawnv".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.spawnve".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.spawnvp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
-"os.spawnvpe".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or add a shell step outside the engine."
+"subprocess".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"multiprocessing".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"concurrent.futures.ProcessPoolExecutor".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"concurrent.futures.process".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"pty".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"asyncio".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.system".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.popen".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.fork".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.forkpty".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.posix_spawn".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.posix_spawnp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execl".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execle".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execlp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execlpe".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execv".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execve".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execvp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execvpe".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnl".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnle".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnlp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnlpe".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnv".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnve".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnvp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnvpe".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
 "socket".msg = "No network client in the engine, because only a warehouse driver reaches the network. Fix: read the data through `experiment pull`."
 "http.client".msg = "No network client in the engine, because only a warehouse driver reaches the network. Fix: read the data through `experiment pull`."
 "urllib.request".msg = "No network client in the engine, because only a warehouse driver reaches the network. Fix: read the data through `experiment pull`."
@@ -173,7 +173,7 @@ ignore = ["E501", "TRY003", "PLR2004", "PLR0913", "PLR0917", "ANN401"]
 "redshift_connector".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["TID251", "S101", "S108", "S603", "S607", "B010", "ANN", "ARG", "PLC0415", "SLF001", "FBT", "T20", "TRY", "PTH123"]
+"tests/**" = ["S101", "S108", "S603", "S607", "B010", "ANN", "ARG", "PLC0415", "SLF001", "FBT", "T20", "TRY", "PTH123"]
 # Experiment code answers only to the banned imports (TID).
 "experiments/**" = ["E", "F", "I", "B", "UP", "SIM", "S", "BLE", "TRY", "PTH", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
 "demos/**" = ["S", "BLE", "TRY", "PTH", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
@@ -225,8 +225,7 @@ ignore_decorators = ["@model_validator", "@field_validator"]
 # The console script and the public helpers that experiment scripts
 # call. Vulture sees none of these callers. `make dead` adds every Pydantic field itself.
 ignore_names = [
-    "Candidates", "classification", "regression", "label", "validate_label_dates",
-    "main", "outputs_dir", "work_dir", "scripts_dir", "save_completion",
+    "Candidates", "classification", "regression", "label", "main", "save_completion",
 ]
 
 [tool.importlinter]
@@ -242,11 +241,12 @@ forbidden_modules = ["demos"]
 
 [[tool.importlinter.contracts]]
 id = "engine-layers"
-name = "CLI above domain above I/O. Fix: move the import up a layer, or pass the value in as an argument."
+name = "A model_finder layer must not import a higher one (order: engine-layers). Fix: move the code down, or pass the value in."
 type = "layers"
 containers = ["model_finder"]
 exhaustive = true
 layers = [
+    "api",
     "cli",
     "completion",
     "labels : rebuild : reseal",
@@ -256,8 +256,8 @@ layers = [
     "run_evidence : holdout : spec",
     "results : ledger",
     "candidates",
-    "candidate_result : metrics",
-    "splits : feature_provenance",
+    "candidate_result : metrics : feature_provenance",
+    "splits",
     "io : paths",
 ]
 

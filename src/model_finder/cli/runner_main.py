@@ -26,10 +26,10 @@ from model_finder.final_evaluation import (
     load_verified_final,
     selection_staleness,
 )
-from model_finder.holdout import TRAIN_FILE_NAME, seal_holdout, write_search_rows
+from model_finder.holdout import TRAIN_FILE_NAME, is_sealed, seal_holdout, write_search_rows
 from model_finder.io import write_text
 from model_finder.labels import assess_final
-from model_finder.paths import DATA_DIRNAME, HOLDOUT_SEAL_FILE_NAME, RUNNER_COMMAND_PATH
+from model_finder.paths import DATA_DIRNAME, RUNNER_COMMAND_PATH
 from model_finder.runner import ExperimentSeed, init_experiment_dir, save_candidate_result
 from model_finder.splits import temporal_search_split, temporal_split
 from model_finder.validation import hyperparameter_warnings
@@ -109,7 +109,7 @@ def initialize_experiment(
     no_holdout: bool,
 ) -> str:
     init_experiment_dir(experiment_dir, config.seed, force=force)
-    if (experiment_dir / HOLDOUT_SEAL_FILE_NAME).exists():
+    if is_sealed(experiment_dir):
         return f"Initialized {experiment_dir}. Its holdout was already sealed."
     if (experiment_dir / DATA_DIRNAME / TRAIN_FILE_NAME).exists():
         return f"Initialized {experiment_dir}. It already has search rows and no holdout."

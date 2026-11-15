@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from model_finder.cli.main import CONTRACT_DOCUMENTS, main
-from model_finder.cli.runner import RunnerConfig, run_runner_main
+from model_finder.cli.runner_main import RunnerConfig, run_runner_main
 from model_finder.cli.setup import PACKAGED_SKILLS
 from model_finder.final_evaluation import freeze_candidate
 from model_finder.holdout import load_search_splits
