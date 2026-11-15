@@ -57,6 +57,16 @@ def test_metrics_refuse_missing_labels(scores) -> None:
         scores(target, np.array([0.1, 0.9, 0.5]))
 
 
+@pytest.mark.parametrize("scores", [classification_scores, regression_scores])
+@pytest.mark.parametrize("bad", [np.nan, np.inf, -np.inf])
+def test_metrics_refuse_non_finite_predictions(scores, bad) -> None:
+    target = pd.Series([0.0, 0.0, 1.0, 1.0], name="label")
+    with pytest.raises(
+        ValueError, match=r"1 of 4 predictions for column label are NaN or infinite.*Fix:"
+    ):
+        scores(target, np.array([bad, 0.1, 0.8, 0.9]))
+
+
 def test_auc_refuses_labels_that_are_not_binary() -> None:
     with pytest.raises(ValueError, match=r"label.*not 0 and 1.*Fix:"):
         classification_scores(pd.Series([0.0, 1.0, 2.0], name="label"), np.array([0.1, 0.5, 0.9]))

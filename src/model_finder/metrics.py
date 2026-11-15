@@ -17,6 +17,18 @@ def _labels(target: pd.Series) -> np.ndarray:
     return target.to_numpy(dtype=float)
 
 
+def _predictions(target: pd.Series, predictions: np.ndarray) -> np.ndarray:
+    """Refuse non-finite predictions: ranking drops NaN, so an unscored row would still yield an AUC."""
+    values = np.asarray(predictions, dtype=float)
+    bad = int((~np.isfinite(values)).sum())
+    if bad:
+        raise ValueError(
+            f"{bad} of {values.size} predictions for column {target.name} are NaN or infinite. "
+            "Fix: make predict return a finite number for every row"
+        )
+    return values
+
+
 def classification_scores(target: pd.Series, scores: np.ndarray) -> dict[str, float]:
     """Return the area under the ROC curve, from the rank-sum statistic."""
     labels = _labels(target)
@@ -32,7 +44,7 @@ def classification_scores(target: pd.Series, scores: np.ndarray) -> dict[str, fl
             f"column {target.name} has only one class in these rows. "
             "Fix: use more rows, or use `Scoring.regression` in candidates.py"
         )
-    ranks = pd.Series(scores).rank().to_numpy()
+    ranks = pd.Series(_predictions(target, scores)).rank().to_numpy()
     rank_sum = float(ranks[positives].sum())
     return {
         "auc": (rank_sum - positive_count * (positive_count + 1) / 2)
@@ -41,5 +53,5 @@ def classification_scores(target: pd.Series, scores: np.ndarray) -> dict[str, fl
 
 
 def regression_scores(target: pd.Series, predictions: np.ndarray) -> dict[str, float]:
-    errors = _labels(target) - np.asarray(predictions, dtype=float)
+    errors = _labels(target) - _predictions(target, predictions)
     return {"rmse": float(np.sqrt((errors**2).mean())), "mae": float(np.abs(errors).mean())}
