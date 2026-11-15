@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(~/.local/share/model-finder/**)",
+      "Edit(~/.local/share/model-finder/**)",
+      "Bash(*model-finder/holdouts*)",
+      "Read(//**/model-finder/holdouts/**)",
+      "Edit(//**/model-finder/holdouts/**)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$(git rev-parse --show-toplevel)/.agents/hooks/post_edit.sh\" claude"
+          }
+        ]
+      }
+    ]
+  }
+}

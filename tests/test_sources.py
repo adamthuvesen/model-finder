@@ -1,4 +1,4 @@
-"""Tests for the warehouse ingestion layer (lib.sources).
+"""Tests for the warehouse ingestion layer (model_finder.sources).
 
 Structural and offline by design: the creds-free DuckDB path is exercised for
 real; the proprietary adapters are checked via fakes. No live warehouse, no
@@ -7,30 +7,41 @@ credentials.
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import json
+import shutil
 import sys
 import types
 
 import pytest
 
-from lib.sources import (
+from model_finder.io import file_sha256
+from model_finder.sources import (
     DatasetManifest,
-    DatasetManifestRequest,
     MissingSourceExtra,
     NonDeterministicQueryError,
     SnapshotFreezeRequest,
     SnapshotIntegrityError,
+    adapters,
     apply_as_of,
     dataset_manifest_from_table,
     freeze_snapshot,
     get_extractor,
     list_bundles,
     read_snapshot,
+    registry,
     require_deterministic_query,
     verify_snapshot,
 )
-from lib.sources.adapters import DatabricksExtractor, RedshiftExtractor, _to_adbc_db_kwargs
+from model_finder.sources.adapters import (
+    DatabricksExtractor,
+    RedshiftExtractor,
+    _to_adbc_db_kwargs,
+)
+from model_finder.sources.errors import ReadOnlyQueryError, SourceError
+from model_finder.sources.query import require_read_only_query
+from model_finder.validation import validate_experiment
 
 pa = pytest.importorskip("pyarrow")
 pq = pytest.importorskip("pyarrow.parquet")
@@ -39,9 +50,6 @@ _HAS_DUCKDB = importlib.util.find_spec("duckdb") is not None
 _HAS_ADBC = importlib.util.find_spec("adbc_driver_manager") is not None
 
 
-# --------------------------------------------------------------------------- #
-# Determinism guard
-# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     "query",
     [
@@ -67,13 +75,161 @@ def test_deterministic_query_accepted(query: str) -> None:
     require_deterministic_query(query)  # must not raise
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "select sample from t order by id",
+        "select id from t where note like '%limit%' order by id",
+        "select id from t {as_of} order by id",
+        "select * from (select * from t order by id limit 5) order by id",
+    ],
+)
+def test_text_that_looks_nondeterministic_passes(query: str) -> None:
+    require_deterministic_query(query)
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "select * from (select * from t limit 5) order by id",
+        "with c as (select * from t limit 5) select * from c order by id",
+        "select * from a union all select * from b limit 3",
+        "select * from t order by uuid()",
+    ],
+)
+def test_row_caps_in_any_scope_are_rejected(query: str) -> None:
+    with pytest.raises(NonDeterministicQueryError):
+        require_deterministic_query(query)
+
+
+@pytest.mark.parametrize("query", ["select from", "select 1; drop table t", "drop table t"])
+def test_unparsable_or_non_query_sql_fails_closed(query: str) -> None:
+    with pytest.raises(SourceError):
+        require_deterministic_query(query)
+
+
+def test_snowflake_top_needs_order_by() -> None:
+    with pytest.raises(NonDeterministicQueryError):
+        require_deterministic_query("select top 5 * from t", dialect="snowflake")
+    require_deterministic_query("select top 5 * from t order by id", dialect="snowflake")
+
+
+def test_moving_time_warns_without_failing() -> None:
+    with pytest.warns(UserWarning, match="moving-time"):
+        require_deterministic_query("select * from t where d < current_date")
+
+
+@pytest.mark.parametrize(
+    ("query", "dialect"),
+    [
+        ("select row_number() over () as n, id from t order by id", "postgres"),
+        ("select seq8() as n, id from t order by id", "snowflake"),
+        ("select randstr(5, 1) as s, id from t order by id", "snowflake"),
+        ("select generate_uuid() as u, id from t order by id", "bigquery"),
+        ("select uuid_generate_v4() as u, id from t order by id", "postgres"),
+        ("select distinct on (a) a, b from t", "postgres"),
+    ],
+)
+def test_hidden_nondeterminism_is_rejected(query: str, dialect: str) -> None:
+    with pytest.raises(NonDeterministicQueryError):
+        require_deterministic_query(query, dialect=dialect)
+
+
+def test_bigquery_current_datetime_warns() -> None:
+    with pytest.warns(UserWarning, match="moving-time"):
+        require_deterministic_query("select current_datetime() as t, id from x", dialect="bigquery")
+
+
+def test_ranking_with_order_is_deterministic() -> None:
+    require_deterministic_query("select row_number() over (order by id) as n from t")
+
+
+@pytest.mark.parametrize(
+    ("query", "dialect"),
+    [
+        ("COPY (SELECT 1) TO '/tmp/out.csv'", "duckdb"),
+        ("WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d", "postgres"),
+        ("SELECT * INTO backup FROM t", "postgres"),
+        ("DROP TABLE t", "duckdb"),
+        ("SELECT 1; DROP TABLE t", "duckdb"),
+        ("INSERT INTO t VALUES (1)", "postgres"),
+        ("ATTACH 'x.db'", "duckdb"),
+        ("PRAGMA enable_profiling", "duckdb"),
+        ("/*! DROP TABLE t */ SELECT 1", "postgres"),
+        ("/* a /* b */ DROP TABLE t -- */ SELECT 1", "postgres"),
+        ("SELECT SYSTEM$CANCEL_ALL_QUERIES()", "snowflake"),
+        ("SELECT seq1.NEXTVAL", "snowflake"),
+        ("SELECT nextval('s')", "redshift"),
+        ("SELECT setval('s', 1)", "postgres"),
+    ],
+)
+def test_writes_are_refused_with_no_override(query: str, dialect: str) -> None:
+    with pytest.raises(SourceError):
+        require_read_only_query(query, dialect)
+
+
+@pytest.mark.parametrize("dialect", ["snowflake", "postgres"])
+@pytest.mark.parametrize("query", ["SELECT 1 ->> DELETE FROM t", "SELECT 1 DELETE FROM t"])
+def test_writes_the_parser_reads_as_reads_are_refused(query: str, dialect: str) -> None:
+    with pytest.raises(ReadOnlyQueryError, match="Fix:"):
+        require_read_only_query(query, dialect)
+
+
+@pytest.mark.parametrize("dialect", ["snowflake", "postgres"])
+def test_json_extract_with_a_literal_key_passes(dialect: str) -> None:
+    require_read_only_query("SELECT col ->> 'key' AS v FROM t", dialect)
+
+
+def test_allow_nondeterministic_does_not_allow_writes(tmp_path) -> None:
+    class FailingExtractor:
+        source_type = "duckdb"
+        driver = "test"
+
+        def extract(self, query: str):
+            raise AssertionError("A write reached the warehouse")
+
+    with pytest.raises(SourceError):
+        freeze_snapshot(
+            SnapshotFreezeRequest(
+                source_type="duckdb",
+                query=f"COPY (SELECT 1) TO '{tmp_path}/out.csv'",
+                out_dir=tmp_path / "data",
+                nondeterministic_reason="A sample is enough.",
+                extractor=FailingExtractor(),
+            )
+        )
+
+
+def test_distinct_on_with_order_by_passes() -> None:
+    require_deterministic_query(
+        "select distinct on (a) a, b from t order by a, b", dialect="postgres"
+    )
+
+
+def test_manifest_records_the_nondeterminism_override(tmp_path) -> None:
+    class StaticExtractor:
+        source_type = "duckdb"
+        driver = "test"
+
+        def extract(self, query: str):
+            return _sample_table()
+
+    manifest = freeze_snapshot(
+        SnapshotFreezeRequest(
+            source_type="duckdb",
+            query="select * from t limit 3",
+            out_dir=tmp_path / "data",
+            nondeterministic_reason="A sample is enough.",
+            extractor=StaticExtractor(),
+        )
+    )
+    assert manifest.allow_nondeterministic is True
+
+
 def test_determinism_escape_hatch() -> None:
     require_deterministic_query("SELECT * FROM t LIMIT 10", allow_nondeterministic=True)
 
 
-# --------------------------------------------------------------------------- #
-# As-of rewriting
-# --------------------------------------------------------------------------- #
 def test_as_of_time_travel_rewrites_placeholder() -> None:
     rewritten, recorded = apply_as_of(
         "SELECT * FROM t {as_of} ORDER BY id", "snowflake", "2026-06-01 00:00:00"
@@ -108,16 +264,18 @@ def test_as_of_non_time_travel_records_value() -> None:
     assert "{as_of}" not in rewritten
 
 
-# --------------------------------------------------------------------------- #
-# Factory + missing-extra errors
-# --------------------------------------------------------------------------- #
+def test_as_of_rejects_trailing_newline() -> None:
+    with pytest.raises(ValueError, match="Invalid --as-of"):
+        apply_as_of("SELECT * FROM t", "postgres", "2026-06-01\n")
+
+
 def test_unknown_source_type_raises() -> None:
     with pytest.raises(ValueError, match="Unknown source type"):
         get_extractor("oracle")
 
 
 def test_postgres_requires_uri_config() -> None:
-    with pytest.raises(ValueError, match="postgres.*--uri"):
+    with pytest.raises(ValueError, match=r"postgres.*--uri"):
         get_extractor("postgres")
 
 
@@ -131,24 +289,24 @@ def test_missing_extra_is_actionable() -> None:
     assert "extra" in message
 
 
-# --------------------------------------------------------------------------- #
-# Manifest model
-# --------------------------------------------------------------------------- #
-def _sample_table() -> pa.Table:
+def _sample_table():
     return pa.table({"id": [1, 2, 3], "label": ["a", "b", "c"]})
 
 
-def test_manifest_roundtrip(tmp_path) -> None:
-    manifest = dataset_manifest_from_table(
-        DatasetManifestRequest(
-            table=_sample_table(),
-            source_type="duckdb",
-            driver="duckdb",
-            query="SELECT * FROM t",
-            as_of=None,
-            sample_seed=None,
-        )
+def _manifest(table, content_sha256: str = "0" * 64) -> DatasetManifest:
+    return dataset_manifest_from_table(
+        table,
+        source_type="duckdb",
+        driver="duckdb",
+        query="SELECT * FROM t",
+        as_of=None,
+        sample_seed=None,
+        content_sha256=content_sha256,
     )
+
+
+def test_manifest_roundtrip(tmp_path) -> None:
+    manifest = _manifest(_sample_table())
     path = tmp_path / "dataset_manifest.json"
     manifest.write(path)
     loaded = DatasetManifest.load(path)
@@ -158,41 +316,20 @@ def test_manifest_roundtrip(tmp_path) -> None:
 
 
 def test_manifest_load_rejects_unknown_keys(tmp_path) -> None:
-    manifest = dataset_manifest_from_table(
-        DatasetManifestRequest(
-            table=_sample_table(),
-            source_type="duckdb",
-            driver="duckdb",
-            query="SELECT * FROM t",
-            as_of=None,
-            sample_seed=None,
-        )
-    )
-    payload = manifest.to_dict()
+    manifest = _manifest(_sample_table())
+    payload = manifest.model_dump()
     payload["bogus"] = 1
     path = tmp_path / "dataset_manifest.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ValueError, match="unknown manifest keys"):
+    with pytest.raises(ValueError, match="bogus"):
         DatasetManifest.load(path)
 
 
-# --------------------------------------------------------------------------- #
-# Snapshot integrity (verify_snapshot)
-# --------------------------------------------------------------------------- #
 def test_verify_snapshot_detects_row_and_schema_drift(tmp_path) -> None:
     table = _sample_table()
     snapshot = tmp_path / "snapshot.parquet"
     pq.write_table(table, snapshot)
-    manifest = dataset_manifest_from_table(
-        DatasetManifestRequest(
-            table=table,
-            source_type="duckdb",
-            driver="duckdb",
-            query="SELECT * FROM t",
-            as_of=None,
-            sample_seed=None,
-        )
-    )
+    manifest = _manifest(table, file_sha256(snapshot))
     verify_snapshot(snapshot, manifest)  # matches: no raise
 
     pq.write_table(pa.table({"id": [1], "label": ["a"]}), snapshot)  # fewer rows
@@ -204,9 +341,18 @@ def test_verify_snapshot_detects_row_and_schema_drift(tmp_path) -> None:
         verify_snapshot(snapshot, manifest)
 
 
-# --------------------------------------------------------------------------- #
-# DuckDB golden round-trip (creds-free, real extraction)
-# --------------------------------------------------------------------------- #
+def test_verify_snapshot_detects_changed_values_with_the_same_shape(tmp_path) -> None:
+    table = _sample_table()
+    snapshot = tmp_path / "snapshot.parquet"
+    pq.write_table(table, snapshot)
+    manifest = _manifest(table, file_sha256(snapshot))
+
+    pq.write_table(pa.table({"id": [1, 2, 3], "label": ["a", "b", "changed"]}), snapshot)
+
+    with pytest.raises(SnapshotIntegrityError, match="content hash"):
+        verify_snapshot(snapshot, manifest)
+
+
 def _make_duckdb(tmp_path):
     import duckdb
 
@@ -267,8 +413,6 @@ def test_read_snapshot_roundtrips_and_verifies(tmp_path) -> None:
 
 @pytest.mark.skipif(not _HAS_DUCKDB, reason="duckdb not installed (needs the models extra)")
 def test_experiment_validate_flags_mutated_snapshot(tmp_path) -> None:
-    import experiment
-
     db_path = _make_duckdb(tmp_path)
     exp = tmp_path / "exp"
     exp.mkdir()
@@ -283,16 +427,13 @@ def test_experiment_validate_flags_mutated_snapshot(tmp_path) -> None:
             config={"database": str(db_path), "read_only": True},
         )
     )
-    assert experiment.validate_experiment(exp) == []
+    assert validate_experiment(exp) == []
 
     pq.write_table(pa.table({"id": [1]}), exp / "data" / "snapshot.parquet")
-    errors = experiment.validate_experiment(exp)
-    assert any("snapshot integrity" in error for error in errors)
+    errors = validate_experiment(exp)
+    assert any("Snapshot verification failed" in error for error in errors)
 
 
-# --------------------------------------------------------------------------- #
-# Proprietary adapters via fakes (wiring only, no live connection)
-# --------------------------------------------------------------------------- #
 def test_databricks_adapter_wiring(monkeypatch) -> None:
     table = _sample_table()
     captured: dict[str, str] = {}
@@ -321,7 +462,7 @@ def test_databricks_adapter_wiring(monkeypatch) -> None:
             return _Cursor()
 
     fake_sql = types.ModuleType("databricks.sql")
-    fake_sql.connect = lambda **kwargs: _Conn()
+    setattr(fake_sql, "connect", lambda **kwargs: _Conn())
     monkeypatch.setitem(sys.modules, "databricks", types.ModuleType("databricks"))
     monkeypatch.setitem(sys.modules, "databricks.sql", fake_sql)
 
@@ -348,16 +489,13 @@ def test_redshift_adapter_wiring(monkeypatch) -> None:
             pass
 
     fake = types.ModuleType("redshift_connector")
-    fake.connect = lambda **kwargs: _Conn()
+    setattr(fake, "connect", lambda **kwargs: _Conn())
     monkeypatch.setitem(sys.modules, "redshift_connector", fake)
 
     result = RedshiftExtractor({"host": "h"}).extract("SELECT 1")
     assert result.num_rows == 2
 
 
-# --------------------------------------------------------------------------- #
-# Bundles
-# --------------------------------------------------------------------------- #
 def test_all_warehouses_have_bundles() -> None:
     types_present = {bundle.source_type for bundle in list_bundles()}
     assert {
@@ -383,14 +521,11 @@ def test_bundles_carry_no_inline_credentials() -> None:
                 assert not secret_pattern.search(str(text)), f"{bundle.source_type}: {text}"
 
 
-# --------------------------------------------------------------------------- #
-# Offline import guard
-# --------------------------------------------------------------------------- #
 def test_importing_sources_does_not_import_warehouse_clients(monkeypatch) -> None:
     for name in list(sys.modules):
-        if name.startswith("lib.sources"):
+        if name.startswith("model_finder.sources"):
             monkeypatch.delitem(sys.modules, name, raising=False)
-    import lib.sources  # noqa: F401
+    importlib.import_module("model_finder.sources")
 
     for client in (
         "adbc_driver_manager",
@@ -402,11 +537,8 @@ def test_importing_sources_does_not_import_warehouse_clients(monkeypatch) -> Non
         assert client not in sys.modules, f"{client} imported at package import time"
 
 
-# --------------------------------------------------------------------------- #
-# CLI
-# --------------------------------------------------------------------------- #
 def test_cli_pull_reports_clean_error_on_nondeterministic_query(tmp_path) -> None:
-    from lib.sources.cli import main
+    from model_finder.cli.main import main
 
     exit_code = main(
         [
@@ -421,11 +553,11 @@ def test_cli_pull_reports_clean_error_on_nondeterministic_query(tmp_path) -> Non
             "SELECT * FROM t LIMIT 1",
         ]
     )
-    assert exit_code == 2  # clean non-zero exit, not a traceback
+    assert exit_code == 1  # clean non-zero exit, not a traceback
 
 
 def test_cli_pull_reports_clean_error_on_missing_postgres_uri(tmp_path) -> None:
-    from lib.sources.cli import main
+    from model_finder.cli.main import main
 
     experiment_dir = tmp_path / "exp"
     experiment_dir.mkdir()
@@ -442,12 +574,9 @@ def test_cli_pull_reports_clean_error_on_missing_postgres_uri(tmp_path) -> None:
         ]
     )
 
-    assert exit_code == 2
+    assert exit_code == 1
 
 
-# --------------------------------------------------------------------------- #
-# As-of validation
-# --------------------------------------------------------------------------- #
 def test_as_of_rejects_injection_garbage() -> None:
     with pytest.raises(ValueError, match="Invalid --as-of"):
         apply_as_of("SELECT * FROM t {as_of}", "snowflake", "2026' OR '1'='1")
@@ -464,9 +593,6 @@ def test_as_of_version_form_is_databricks_only() -> None:
         apply_as_of("SELECT * FROM t {as_of}", "snowflake", "v5")
 
 
-# --------------------------------------------------------------------------- #
-# Determinism: extra row-cap clauses + moving-time warning
-# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     "query",
     [
@@ -489,9 +615,6 @@ def test_moving_time_predicate_warns_without_raising() -> None:
         require_deterministic_query("SELECT * FROM t WHERE created_at > current_date - 7")
 
 
-# --------------------------------------------------------------------------- #
-# ADBC friendly-key -> option-namespace mapping
-# --------------------------------------------------------------------------- #
 def test_adbc_key_mapping_snowflake() -> None:
     out = _to_adbc_db_kwargs(
         "snowflake",
@@ -522,3 +645,31 @@ def test_adbc_key_mapping_bigquery_and_passthrough() -> None:
     assert out["adbc.bigquery.sql.project_id"] == "p"
     # Already-namespaced keys pass through unchanged.
     assert out["adbc.bigquery.sql.dataset_id"] == "d"
+
+
+def test_a_new_adbc_source_is_one_bundle_file(tmp_path, monkeypatch) -> None:
+    bundles = tmp_path / "bundles"
+    shutil.copytree(registry.BUNDLES_DIR, bundles)
+    (bundles / "newsql").mkdir()
+    (bundles / "newsql/source.json").write_text(
+        json.dumps(
+            {
+                "source_type": "newsql",
+                "display_name": "NewSQL",
+                "extra": "newsql",
+                "package": "adbc-driver-newsql",
+                "driver": "adbc",
+                "description": "A new warehouse.",
+                "adbc_module": "adbc_driver_newsql.dbapi",
+                "connection_keys": {"account": "adbc.newsql.account"},
+            }
+        )
+    )
+    monkeypatch.setattr(registry, "BUNDLES_DIR", bundles)
+    try:
+        reloaded = importlib.reload(adapters)
+        assert "newsql" in reloaded.SUPPORTED_SOURCE_TYPES
+        assert reloaded.AdbcExtractor("newsql", {"account": "a"}).driver == "adbc"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(adapters)

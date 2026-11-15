@@ -1,241 +1,124 @@
-# Agentic ML Loop
+# Model Finder
 
-![License](https://img.shields.io/github/license/adamthuvesen/agentic-ml-loop) ![Python](https://img.shields.io/badge/python-3.13%2B-blue)
+![License](https://img.shields.io/github/license/adamthuvesen/model-finder) ![Python](https://img.shields.io/badge/python-3.14%2B-blue)
 
-`agentic-ml-loop` runs local, repeatable ML experiment cycles. You write a spec,
-choose a runner, and the loop asks for one bounded hypothesis test at a time.
-It keeps the journal and leaderboard updated as it goes.
+A model-search engine for a coding agent running under a native client `/goal`.
+The client keeps the agent going. This repo makes the result trustworthy:
 
-Cycles are checked in code ([`loop/cycle_attempt.py`](loop/cycle_attempt.py),
-[`loop/contracts.py`](loop/contracts.py)): the journal must be updated,
-`experiment.md` must stay unchanged, exactly one completion marker must appear,
-and results must match the expected schema and metrics. Failed cycles roll back
-and retry.
+- Candidates receive search rows only. The holdout is sealed outside the workspace.
+- Selection is frozen before the holdout is read, and a read holdout leaves a permanent record.
+- Every result is bound to its specification, data, and code, and a completion check verifies the chain.
 
-The repo ships with deterministic synthetic demos only. No external data source
-is required. Start with [`examples/`](examples/) for a worked output and
-[`.agents/docs/architecture.md`](.agents/docs/architecture.md) for internals.
+This repo was named `agentic-ml-loop` while it was a supervisor loop.
+[Read why that loop was replaced](.agents/docs/decisions/native-goals.md).
 
-## Setup
+## Migrating from `python -m loop`
 
-Requires Python 3.13+ and `uv`.
+The loop is gone. To keep using it, check out the git tag `loop-final`. Old `results.json` files fail validation, so
+rerun candidates in a new experiment.
 
-```bash
-uv sync --extra models --extra deep   # extras optional; dev group installs by default
-uv run pre-commit install
-```
+## Try it offline
 
-## Fastest demo
-
-Use `demo_bootstrap` for the quickest trust check. It is a tiny synthetic
-classification experiment with committed results.
+Requires Python 3.14+ and `uv`. This costs nothing and calls no LLM.
 
 ```bash
-uv run --extra models python runners/demo_bootstrap_runner.py list-candidates
-uv run python experiment.py validate experiments/demo_bootstrap
+uv sync --extra models
+demo() { uv run --extra models python -m demos.demo_bootstrap "$@"; }
+
+# First leaderboard: three commands, with no holdout. Results stay labelled exploratory.
+demo init-demo --experiment experiments/quick --no-holdout
+demo run-candidate --experiment experiments/quick --candidate logreg-tiny
+uv run experiment leaderboard experiments/quick
+
+# The recommended path seals a holdout:
+demo init-demo --experiment experiments/my_run          # seeds files, seals the holdout
+demo run-candidate --experiment experiments/my_run --candidate majority-baseline
+demo run-candidate --experiment experiments/my_run --candidate logreg-tiny
+demo freeze-candidate --experiment experiments/my_run --candidate logreg-tiny
+demo evaluate-final --experiment experiments/my_run     # reads the holdout once
+uv run experiment validate experiments/my_run
+uv run experiment leaderboard experiments/my_run
 ```
 
-Expected output includes six candidate ids, ending with `lgbm-conservative`,
-then `Validation passed: experiments/demo_bootstrap`. In this checkout, both
-commands finished in under 10 seconds after dependencies were present. The first
-`uv` run may take longer while it prepares the environment.
+`evaluate-final` needs a frozen selection. A second read needs `--allow-reread --reason <text>`, and it labels the
+estimate exploratory. Sealed rows are written under
+`$XDG_DATA_HOME/model-finder/holdouts/`, defaulting to `~/.local/share`.
 
-Open [`examples/demo_bootstrap_replay.html`](examples/demo_bootstrap_replay.html)
-in a browser to replay the five committed research cycles. It is generated from
-[`experiments/demo_bootstrap/research_journal.md`](experiments/demo_bootstrap/research_journal.md)
-and [`experiments/demo_bootstrap/results.json`](experiments/demo_bootstrap/results.json).
-
-## Experiment layout
-
-Each experiment lives under `experiments/<experiment_id>/`:
-
-| Path | Purpose |
-| --- | --- |
-| `experiment.md` | Objective, dataset, target, split policy, and constraints |
-| `research_journal.md` | Cycle-by-cycle hypotheses, results, and implications |
-| `research_sources.md` | Reusable research notes for the experiment |
-| `results.json` | Candidate scores and metrics |
-| `outputs/` | Human-facing reports and artifacts |
-| `work/` | Intermediate artifacts reused by later cycles |
-| `scripts/` | One-shot scripts written during cycles |
-
-`loop/` starts a fresh runner process per cycle. The runner receives the cycle
-prompt on stdin and ends by writing `cycles/<cycle_id>/cycle_status.json` with
-`{"status": "CYCLE_DONE"}` or `{"status": "EXPERIMENT_COMPLETE"}`. The
-supervisor clears that file before each attempt, so only the current attempt can
-fill it.
-
-## Runners
-
-Presets cover Claude, Codex, and Cursor; custom commands work too. Cycles run
-unattended, so no preset can stop to ask for approval — each grants shell access
-up front. They name the tools they grant and keep the CLI's own sandbox on where
-it has one, rather than switching enforcement off wholesale.
+## Use your own CSV
 
 ```bash
-uv run python -m loop start experiments/demo_bootstrap --runner claude
-uv run python -m loop start experiments/demo_bootstrap --runner codex --runner-model gpt-5.5-high --runner-effort high
-uv run python -m loop start experiments/demo_bootstrap --runner-command "claude --print --verbose --output-format stream-json"
+uv run experiment new churn --csv rows.csv --target label   # prints a first leaderboard
+uv run experiment candidate new gbdt --experiment experiments/churn  # adds a function to candidates.py
+uv run python experiments/churn/model/run.py run-candidate --candidate gbdt
+uv run experiment next                                      # says what could come next
 ```
 
-| Runner | Default command |
-| --- | --- |
-| Claude | `claude --print --verbose --output-format stream-json --permission-mode acceptEdits --allowedTools <list> --model opus` (`claude-opus-4-8-high` is recorded as the requested model) |
-| Codex | `codex exec --full-auto -c sandbox_workspace_write.network_access=true --model gpt-5.5-high` |
-| Cursor | `cursor-agent --print --force --model composer-2.5` |
+A candidate is one function. It gets train and validation rows and returns a function that predicts. The engine scores it
+and records the result. Lines marked `CHANGE` are the choices to review. A date-like column sets the split order. Pass
+`--no-holdout` to keep every row for search. The result is then labelled exploratory.
 
-The Claude allowlist is `CLAUDE_ALLOWED_TOOLS` in `loop/invoke.py`: the built-in
-file, shell, and web tools plus `mcp__context7`, which the first-cycle prompt
-asks for. Other MCP servers need `--runner-command`. Codex runs in its
-workspace-write sandbox with network access enabled, since cycles do live
-research.
-
-`--runner-effort` maps to `--effort` for Claude and
-`-c model_reasoning_effort=<effort>` for Codex; Cursor has no effort flag, so
-pick a model id that encodes it. Environment defaults: `AGENTIC_ML_LOOP_RUNNER`,
-`AGENTIC_ML_LOOP_RUNNER_COMMAND`, `AGENTIC_ML_LOOP_RUNNER_MODEL`,
-`AGENTIC_ML_LOOP_RUNNER_EFFORT`, `AGENTIC_ML_LOOP_RUNNER_TIMEOUT` (seconds).
-Built-in runners record the requested model and the resolved CLI model
-separately; this lets the Claude preset keep the intended Opus model while using
-the local CLI's accepted `opus` alias.
-
-Troubleshooting: presets shell out to `claude`, `codex`, or `cursor-agent`,
-which must be on `PATH`. Otherwise pass an absolute path via `--runner-command`
-or `AGENTIC_ML_LOOP_RUNNER_COMMAND`. The cross-experiment learnings step also
-calls `claude`; when absent, it is skipped rather than failing the loop.
-
-## Research referee
-
-After each cycle the loop writes an advisory scorecard
-([`lib/referee.py`](lib/referee.py)); it never blocks a cycle:
-
-| Criterion | What it checks |
-| --- | --- |
-| `journal_updated` | The cycle was actually recorded (evidence discipline) |
-| `hypothesis_framed` | A falsifiable hypothesis / expectation was stated |
-| `evidence_or_understanding` | New results were produced, or understanding was logged |
-| `noise_awareness` | New candidates were judged against uncertainty (CI / bootstrap / significance) |
-| `leakage_split_clean` | No unaddressed leakage or split-reliability concern |
-| `analysis_when_saturating` | Error analysis happened before declaring a ceiling |
-
-Scorecards land in `cycles/<id>/scorecard.json`; the latest grade shows in
-`status.md`. Disable with `--no-referee` or `AGENTIC_ML_LOOP_REFEREE=0`.
-
-## Benchmark
-
-Run the same spec across several runners:
+## Use it from another repository
 
 ```bash
-uv run python -m loop bench experiments/demo_bootstrap --runners claude,codex,cursor --max-cycles 6
+uv add model-finder                       # or, to develop against a local engine checkout:
+uv add --editable ../model-finder
+uv run experiment setup                      # links skills, adds the holdout deny rule and the agent hooks
 ```
 
-Each runner gets an isolated copy of the spec and the same cycle budget, with
-the referee on. Results go to `bench/<id>-<timestamp>/comparison.md` and
-`comparison.csv`, ordered by mean referee score, then best validation score. A
-runner error is recorded and does not stop the others.
+To deny claude.ai connector writes, declare each connector in your `pyproject.toml`. Setup then owns every
+`mcp__claude_ai_*` deny rule, and drops one that no declaration names:
+
+```toml
+[[tool.model-finder.connectors]]
+name = "Slack"
+write_tools = ["slack_send_message", "slack_create_canvas"]
+```
+
+Your candidates, loaders, and metrics live in your own modules: `RunnerConfig`, `Candidates`, and `Scoring(..., evaluate=...)`
+take them with no engine change.
+
+## Run research
+
+Inside Claude Code or Codex, start one goal that names the skill and the experiment:
+
+```text
+/goal Use the research skill to answer the question in experiments/my_run/experiment.md.
+```
+
+To create a new experiment from a dataset, use the `experiment-spec` skill.
+Finish with `uv run experiment complete-check experiments/my_run`. It prints `complete`, `complete, exploratory`,
+or `not complete`.
+`uv run experiment contract evidence` explains the labels and what they do not prove.
 
 ## Demos
 
-Four deterministic demos exercise the framework:
+| Demo | Problem | Install |
+| --- | --- | --- |
+| `demo_bootstrap` | Small classification smoke test | `--extra models` |
 
-- `demo_bootstrap`: tiny classification smoke test
-- `demo_classification`: synthetic binary classification
-- `demo_regression`: synthetic zero-inflated revenue regression
-- `demo_deep`: synthetic nonlinear tabular classification with PyTorch MLPs
+All data is synthetic and generated in memory. Run `python -m demos.<demo> list-candidates`.
+Each `init-demo` generates new rows, so you can run a demo as many times as you like.
 
-```bash
-uv run --extra models python runners/demo_bootstrap_runner.py init-demo --force
-uv run --extra deep python runners/demo_deep_runner.py init-demo --force
-uv run --extra deep python runners/demo_deep_runner.py list-candidates
-uv run --extra deep python runners/demo_deep_runner.py run-candidate \
-  --experiment experiments/demo_deep --candidate mlp-deep
-uv run python experiment.py validate experiments/demo_bootstrap
-uv run python -m loop status experiments/demo_bootstrap
-```
+## Warehouse snapshots (optional)
 
-Synthetic datasets are generated in memory when missing. Generator scripts can
-materialize local CSVs, which git ignores.
-
-`loop status` needs an initialized loop state; before a loop run it reports
-`No loop state found`.
-
-## Selection freeze and final holdout
-
-For experiments with a locked test/holdout split, freeze model selection before
-test access:
+Pull once from Snowflake, BigQuery, Redshift, Databricks, Postgres, or DuckDB, then run offline.
 
 ```bash
-uv run python -m loop freeze experiments/<id> --candidate <validation-winner> \
-  --reason "validation winner"
-uv run python -m loop final-holdout experiments/<id>
-uv run python -m loop ledger experiments/<id>
-```
-
-`freeze` records the validation-selected candidate ids in `loop_state.json`.
-After freeze, shared candidate runners refuse normal `results.json` writes.
-`final-holdout` is only available after freeze; it writes test metrics to
-`outputs/final_holdout.json`, marks `final_holdout_accessed=true`, and the loop
-will not continue even under `--run-until-limit`. `ledger` rebuilds
-`outputs/cycle_metrics.csv` deterministically from `cycles/*/cycle_summary.json`.
-
-External targets that depend on private or gitignored snapshots should add a
-small committed fixture manifest based on
-[`experiments/templates/external-target-fixture-contract.json`](experiments/templates/external-target-fixture-contract.json).
-Validate a manifest with:
-
-```bash
-uv run python -m lib.external_targets.fixtures path/to/fixture-contract.json
-```
-
-## Portable notebooks
-
-Experiments can declare a notebook recipe in `experiments/<id>/notebook.yaml`:
-
-```bash
-uv run python -m lib.notebook_export experiments/<id>
-```
-
-Generated notebooks land in `experiments/<id>/outputs/`, which git ignores.
-
-## Warehouse ingestion (optional)
-
-Pull a frozen snapshot from Snowflake, BigQuery, Redshift, Databricks, or
-Postgres, then run the loop offline. The warehouse is touched once; cycles never
-query it. Clients are optional extras, and the default install stays `numpy` +
-`pandas`.
-
-```bash
-uv sync --extra postgres              # or: snowflake | bigquery | databricks | redshift
-python -m lib.sources sources list    # see available sources + setup docs
-python -m lib.sources pull \
-  --experiment experiments/<id> --source duckdb \
+uv sync --extra models                # DuckDB; for others use postgres | snowflake | bigquery | databricks | redshift
+uv run experiment sources list
+uv run experiment pull --experiment experiments/<id> --source duckdb \
   --database path/to.duckdb --query "SELECT * FROM events ORDER BY id"
+uv run experiment seal --experiment experiments/<id> --time-column event_date
 ```
 
-A pull writes `experiments/<id>/data/snapshot.parquet` plus a
-`dataset_manifest.json` (source, query, as-of, row count, schema hash);
-`experiment.py validate` checks the parquet against the manifest. The
-experiment's `data.py` loads it offline:
+Pulls refuse any write, and no flag overrides that. Each source has a `SETUP.md` under
+[`src/model_finder/sources/bundles/`](src/model_finder/sources/bundles/). DuckDB and local Postgres are tested end
+to end. The other connectors are tested against mocked clients.
 
-```python
-from lib.sources import read_snapshot
-
-def load_dataset():
-    return read_snapshot(EXPERIMENT_DIR)  # verifies integrity, returns a DataFrame
-```
-
-Each source has a `SETUP.md` (keyless auth + required read-only grant) under
-[`lib/sources/bundles/`](lib/sources/bundles/); see
-[`examples/warehouse/postgres/`](examples/warehouse/postgres/) for a creds-free
-local Postgres demo. Reproducible as-of uses warehouse time travel
-(Snowflake/BigQuery/Databricks) or a modeled time predicate (Redshift/Postgres).
-The DuckDB and local-Postgres paths are tested end to end; the four proprietary
-connectors are verified against mocked clients, not live warehouses.
-
-## Tests
+## Develop
 
 ```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run --extra models pytest tests/ -v --tb=short
+make setup
 ```
+
+The check commands are in [AGENTS.md](AGENTS.md#commands).

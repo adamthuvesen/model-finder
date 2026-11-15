@@ -1,0 +1,16 @@
+
+
+@candidates.add
+def __NAME__(splits: SearchSplits) -> Predict:
+    """CHANGE: say what this tries. This one is least squares on numeric columns."""
+    train = _features(splits.train)
+    columns = list(train.columns)
+    inputs = np.c_[np.ones(len(train)), train.to_numpy(float)]
+    target = splits.train[TARGET].to_numpy(float)
+    weights, *_ = np.linalg.lstsq(inputs, target, rcond=None)
+
+    def predict(rows: pd.DataFrame) -> np.ndarray:
+        values = _features(rows)[columns].to_numpy(float)
+        return np.c_[np.ones(len(rows)), values] @ weights
+
+    return predict

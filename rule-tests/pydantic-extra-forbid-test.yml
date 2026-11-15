@@ -1,0 +1,28 @@
+id: pydantic-extra-forbid
+valid:
+  - |
+    class Good(BaseModel):
+        model_config = ConfigDict(extra="forbid", frozen=True)
+        name: str
+  - |
+    class Multiline(BaseModel):
+        model_config = ConfigDict(
+            frozen=True,
+            extra="forbid",
+        )
+  - |
+    class Child(Good):
+        other: str
+invalid:
+  - |
+    class Bad(BaseModel):
+        name: str
+  - |
+    class Qualified(pydantic.BaseModel):
+        name: str
+  - |
+    class Open(BaseModel):
+        model_config = ConfigDict(extra="allow")
+  - |
+    class Child(Good):
+        model_config = ConfigDict(extra="allow")

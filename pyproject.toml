@@ -1,9 +1,9 @@
 [project]
-name = "agentic-ml-loop"
+name = "model-finder"
 version = "0.1.0"
-description = "Agent-driven offline model-search loop"
+description = "Native-goal ML experiment engine with sealed holdouts and a verifiable evidence chain"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 license = "Apache-2.0"
 authors = [{ name = "Adam Thuvesen" }]
 keywords = ["agents", "machine-learning", "experimentation", "offline-evaluation"]
@@ -12,12 +12,15 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
+    "pyarrow>=21.0.0",
     "numpy>=2.2.6",
     "pandas>=2.3.3",
+    "pydantic>=2.14.2",
+    "sqlglot>=30.29.0",
 ]
 
 [project.optional-dependencies]
@@ -29,7 +32,6 @@ models = [
     "matplotlib>=3.10.8",
     "optuna>=4.3.0",
     "polars>=1.0.0",
-    "pyarrow>=21.0.0",
     "scikit-learn>=1.7.1",
     "scipy>=1.15.0",
     "seaborn>=0.13.0",
@@ -38,43 +40,51 @@ models = [
     "tqdm>=4.66.0",
     "xgboost>=3.0.4",
 ]
-# Warehouse ingestion (optional, opt-in per warehouse). The default install
-# stays numpy + pandas only; these pull in only when a user installs the extra.
-# `sources` is the shared Arrow base; each warehouse extra is self-contained.
-sources = [
-    "pyarrow>=21.0.0",
-]
+# Warehouse ingestion (optional, opt-in per warehouse). The default install stays free of
+# warehouse clients; these pull in only when a user installs the extra.
 postgres = [
-    "agentic-ml-loop[sources]",
     "adbc-driver-manager>=1.11.0",
     "adbc-driver-postgresql>=1.11.0",
 ]
 snowflake = [
-    "agentic-ml-loop[sources]",
     "adbc-driver-manager>=1.11.0",
     "adbc-driver-snowflake>=1.10.0",
 ]
 bigquery = [
-    "agentic-ml-loop[sources]",
     "adbc-driver-manager>=1.11.0",
     "adbc-driver-bigquery>=1.10.0",
 ]
 databricks = [
-    "agentic-ml-loop[sources]",
     "databricks-sql-connector[pyarrow]>=4.0",
 ]
 redshift = [
-    "agentic-ml-loop[sources]",
     "redshift-connector>=2.1",
 ]
-viz = []
 deep = [
-    "agentic-ml-loop[models]",
+    "model-finder[models]",
     "torch>=2.2.0",
 ]
 
+[project.scripts]
+experiment = "model_finder.cli.main:main"
+
 [dependency-groups]
-dev = ["pre-commit>=4.0.0", "pytest>=8.0", "ruff>=0.11"]
+dev = [
+    "actionlint-py>=1.7.12.25",
+    "ast-grep-cli>=0.51.1",
+    "basedpyright==1.40.2",
+    "deptry>=0.25.1",
+    "import-linter>=2.15",
+    "pandas-stubs>=3.1.0.261029",
+    "pip-audit>=2.10.1",
+    "pre-commit>=4.0.0",
+    "pytest>=8.0",
+    "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8.0",
+    "ruff==0.17.4",
+    "vulture>=2.16",
+    "zizmor>=1.32.0",
+]
 
 [build-system]
 requires = ["setuptools>=77"]
@@ -82,28 +92,192 @@ build-backend = "setuptools.build_meta"
 
 [tool.uv]
 package = true
+# A user-level `only-managed` makes uv rebuild .venv on a Python under a custom XDG_DATA_HOME.
+python-preference = "managed"
 default-groups = ["dev"]
 
 [tool.setuptools.packages.find]
-include = ["lib*", "loop*", "runners*"]
+where = ["src"]
+include = ["model_finder*"]
 
-[tool.setuptools]
-py-modules = ["experiment"]
+[tool.setuptools.package-data]
+model_finder = [
+    "templates/*",
+    "hooks/*",
+    "sources/bundles/*/*",
+    "skills/**/*",
+    "contract/*.md",
+    "py.typed",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short"
+pythonpath = ["."]
+addopts = "-v --tb=short --strict-markers"
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
-extend-exclude = ["experiments/*/scripts"]
+target-version = "py314"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM"]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "S", "BLE", "TRY", "PTH", "TID", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH", "PGH003"]
 # Line length is enforced by the formatter; don't nag about unsplittable
 # strings, URLs, and f-strings.
-ignore = ["E501"]
+ignore = ["E501", "TRY003", "PLR2004", "PLR0913", "PLR0917", "ANN401"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"anthropic".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
+"claude_agent_sdk".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
+"claude_code_sdk".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
+"openai".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
+"litellm".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
+"langchain".msg = "No agent SDK, because the native goal owns execution. Fix: remove this import."
+"subprocess".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"multiprocessing".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"concurrent.futures.ProcessPoolExecutor".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"concurrent.futures.process".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"pty".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"asyncio".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.system".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.popen".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.fork".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.forkpty".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.posix_spawn".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.posix_spawnp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execl".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execle".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execlp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execlpe".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execv".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execve".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execvp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.execvpe".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnl".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnle".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnlp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnlpe".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnv".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnve".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnvp".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"os.spawnvpe".msg = "No process spawn, because that is how an agent runner starts. Fix: call the function directly, or put the shell step in scripts/, where spawns are allowed."
+"socket".msg = "No network client in the engine, because only a warehouse driver reaches the network. Fix: read the data through `experiment pull`."
+"http.client".msg = "No network client in the engine, because only a warehouse driver reaches the network. Fix: read the data through `experiment pull`."
+"urllib.request".msg = "No network client in the engine, because only a warehouse driver reaches the network. Fix: read the data through `experiment pull`."
+"requests".msg = "No network client in the engine, because only a warehouse driver reaches the network. Fix: read the data through `experiment pull`."
+"httpx".msg = "No network client in the engine, because only a warehouse driver reaches the network. Fix: read the data through `experiment pull`."
+"adbc_driver_manager".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
+"adbc_driver_postgresql".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
+"adbc_driver_snowflake".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
+"adbc_driver_bigquery".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
+"databricks".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
+"redshift_connector".msg = "Warehouse drivers load only through `_require` in src/model_finder/sources/adapters.py. Fix: add an adapter there."
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S108", "S603", "S607", "B010", "ANN", "ARG", "PLC0415", "SLF001", "FBT", "T20", "TRY", "PTH123"]
+# Experiment code answers only to the banned imports (TID).
+"experiments/**" = ["E", "F", "I", "B", "UP", "SIM", "S", "BLE", "TRY", "PTH", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
+"demos/**" = ["S", "BLE", "TRY", "PTH", "ANN", "PL", "RUF", "C4", "DTZ", "T20", "ARG", "ERA", "PERF", "FBT", "SLF", "RET", "PGH"]
+# The command line is the one place that prints.
+"src/model_finder/cli/*.py" = ["T201"]
+"scripts/**" = ["S603", "S607", "TID251", "T201"]
+".agents/skills/*/verify" = ["S603", "S607", "TID251", "T201"]
+".agents/skills/*/drives.py" = ["S603", "S607", "TID251"]
+# Warehouse clients and pyarrow stay optional, so these imports must stay lazy.
+"src/model_finder/sources/*.py" = ["PLC0415"]
 
 [tool.ruff.format]
 quote-style = "double"
+exclude = ["experiments/**"]
+
+[tool.basedpyright]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+enableTypeIgnoreComments = false
+reportUnnecessaryTypeIgnoreComment = "error"
+venvPath = "."
+venv = ".venv"
+failOnWarnings = false
+include = ["src", "demos", "tests"]
+exclude = ["**/.venv", "**/__pycache__"]
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportMissingTypeStubs = false
+
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+extraPaths = ["."]
+reportMissingParameterType = false
+reportPrivateUsage = false
+
+[tool.deptry]
+extend_exclude = ["experiments", "examples", "scripts"]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["catboost", "duckdb", "joblib", "matplotlib", "optuna", "polars", "scipy", "seaborn", "shap", "statsmodels", "torch", "tqdm", "xgboost", "adbc-driver-manager", "adbc-driver-postgresql", "adbc-driver-snowflake", "adbc-driver-bigquery", "databricks-sql-connector", "redshift-connector"]
+
+[tool.vulture]
+paths = ["src", "demos"]
+min_confidence = 60
+ignore_decorators = ["@model_validator", "@field_validator"]
+# The console script and the public helpers that experiment scripts
+# call. Vulture sees none of these callers. `make dead` adds every Pydantic field itself.
+ignore_names = [
+    "Candidates", "classification", "regression", "label", "main", "save_completion",
+]
+
+[tool.importlinter]
+root_packages = ["model_finder", "demos"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+id = "engine-independent-of-demos"
+name = "The engine never imports demos. Fix: pass demo objects in through RunnerConfig."
+type = "forbidden"
+source_modules = ["model_finder"]
+forbidden_modules = ["demos"]
+
+[[tool.importlinter.contracts]]
+id = "engine-layers"
+name = "A model_finder layer must not import a higher one (order: engine-layers). Fix: move the code down, or pass the value in."
+type = "layers"
+containers = ["model_finder"]
+exhaustive = true
+layers = [
+    "api",
+    "cli",
+    "completion",
+    "labels : rebuild : reseal",
+    "final_evaluation : runner",
+    "data_audit : validation",
+    "sources",
+    "run_evidence : holdout : spec",
+    "results : ledger",
+    "candidates",
+    "candidate_result : metrics : feature_provenance",
+    "splits",
+    "io : paths",
+]
+
+[[tool.importlinter.contracts]]
+id = "demos-cannot-reach-holdout-store"
+name = "Demos do not import the holdout store. Fix: score holdout rows through score_rows and evaluate-final."
+type = "forbidden"
+source_modules = ["demos"]
+forbidden_modules = ["model_finder.holdout", "model_finder.ledger", "model_finder.final_evaluation"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+id = "no-agent-runtime"
+name = "The engine and demos import no agent SDK. Fix: remove the import, because the native goal runs the agent."
+type = "forbidden"
+source_modules = ["model_finder", "demos"]
+forbidden_modules = ["anthropic", "openai", "claude_agent_sdk", "claude_code_sdk", "langchain", "litellm"]
+
+[tool.coverage.run]
+source = ["model_finder", "demos"]
+
+[tool.coverage.report]
+precision = 2

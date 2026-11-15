@@ -1,0 +1,23 @@
+{
+  "source_type": "bigquery",
+  "display_name": "Google BigQuery",
+  "extra": "bigquery",
+  "package": "adbc-driver-bigquery",
+  "driver": "adbc",
+  "time_travel": true,
+  "description": "BigQuery via experimental ADBC; FOR SYSTEM_TIME AS OF for as-of.",
+  "read_only_grant": "roles/bigquery.jobUser + roles/bigquery.dataViewer (never dataEditor).",
+  "auth_modes": [
+    "ADC (gcloud auth application-default login)",
+    "impersonation",
+    "service-account key"
+  ],
+  "credentials_via": "Application Default Credentials (keyless) / env",
+  "adbc_module": "adbc_driver_bigquery.dbapi",
+  "connection_keys": {
+    "project": "adbc.bigquery.sql.project_id",
+    "project_id": "adbc.bigquery.sql.project_id",
+    "dataset": "adbc.bigquery.sql.dataset_id",
+    "dataset_id": "adbc.bigquery.sql.dataset_id"
+  }
+}

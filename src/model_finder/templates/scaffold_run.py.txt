@@ -1,0 +1,34 @@
+"""Runner for __SLUG__. Run `python __RUN_PATH__ --help` for its commands."""
+
+from pathlib import Path
+
+import pandas as pd
+
+from model_finder.api import ExperimentSeed, RunnerConfig, run_runner_main
+
+HERE = Path(__file__).resolve().parent
+# CHANGE: load rows from anywhere in `rows_loader`.
+CSV = (HERE / __CSV__).resolve()
+# CHANGE: the column that orders the split. None keeps the file's row order.
+TIME_COLUMN = __TIME__
+
+
+def load_config() -> RunnerConfig:
+    """Import candidates here, so that a mistake in them reports its own line."""
+    from candidates import candidates
+
+    target = candidates.scoring.target_column
+    return RunnerConfig(
+        seed=ExperimentSeed(__SLUG_TEXT__),
+        candidate_runners=candidates,
+        rows_loader=lambda _seed: pd.read_csv(CSV).dropna(subset=[target]),
+        rows_source=CSV,
+        time_column=TIME_COLUMN,
+        target_column=target,
+        code_root=HERE,
+        experiment_dir=HERE.parent,
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(run_runner_main(load_config))

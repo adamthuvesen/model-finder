@@ -1,94 +1,87 @@
-# AGENTS.md - Agentic ML Loop
+# AGENTS.md
 
-`agentic-ml-loop` is a local, offline model-search harness for agent-driven ML
-experiments. The main unit of work is an experiment under `experiments/<experiment_id>/`.
+`model-finder` is a model-search engine for an agent running under a native client `/goal`.
+The client owns continuation. This repo owns the evidence: search rows, a sealed holdout,
+run records, and a completion check. Docs: [architecture](.agents/docs/architecture.md),
+[labels and limits](docs/evidence.md), [why native goals](.agents/docs/decisions/native-goals.md).
 
-User-level guidance (tone, principles, git etiquette, code conduct) lives in
-`~/.claude/CLAUDE.md` and `~/dotfiles/agents/AGENTS.md` and is *not* duplicated
-here. This file is for project-specific facts.
+Domain terms are in `GLOSSARY.md`. A change that adds, renames, or redefines a term updates it in the same commit.
 
-## Layout
+## Where things go
 
-```
-experiment.py     Experiment validation + shared helpers
-program.md        Research principles + ML craft, read by each cycle
-guidelines.md     Operational rules injected into cycle prompts
-loop/             Long-running supervisor and runner invocation
-runners/          Demo runner entrypoints
-lib/              Shared modules (paths.py -> outputs/work/scripts; io, eval, schemas)
-experiments/      One dir per experiment; <experiment_id>/ holds all its files
-.agents/skills/   Portable local skills for experiment setup and notebooks
-.agents/docs/     Subsystem docs; see Index
-```
+| Task | File |
+| --- | --- |
+| New experiment on a CSV | `experiment new <slug> --csv <file>` |
+| New candidate | One function in `experiments/<slug>/model/candidates.py`: `experiment candidate new <name>` |
+| New result field | One optional field in `CandidateResult`. A required field also needs a value in `scored_candidate` and in `result_fields()` in `tests/conftest.py` |
+| New source | `sources/bundles/<name>/source.json` and `SETUP.md`, an extra in `pyproject.toml`, and a `source_type` that is a sqlglot dialect. A non-ADBC driver also needs an adapter class. `experiment sources check` reports what is missing |
+| A label or an exploratory reason | `labels.py` |
+| Freeze and evaluate | `final_evaluation.py` |
+| Reseal, or rebuild the leaderboard | `reseal.py`, `rebuild.py` |
+| A name experiment code imports | `api.py`. Consumers import only from there |
+| Skills and documents shipped in the wheel | `src/model_finder/skills/`, `contract/` |
 
-## Quickstart
+## Commands
 
 ```bash
-uv run python experiment.py validate experiments/<experiment_id>   # add --strict-completion for completion checks
-uv run python -m loop start experiments/<experiment_id>            # also: resume, status; --max-cycles N
-uv run --extra models python runners/<experiment_id>_runner.py run-candidate --experiment experiments/<experiment_id> --candidate <id>
-uv run --extra models python runners/demo_bootstrap_runner.py init-demo --force
-
-# CI check:
-uv run ruff check . && uv run ruff format --check . && uv run --extra models --extra deep pytest
+make setup            # after a clone or a lockfile change
+make quick            # only changed Python files, no tests: under 1s for one file
+make check            # the fast lane, about 13s; the first CI job
+make fix              # ruff lint fixes, then ruff format
+make slow             # slow tests in tests/verify, then the coverage gate; run make check first
+make verify           # drive the real CLI offline; ARGS=all, list, control, or drive names
+uv run experiment next
+uv run experiment contract commands
 ```
 
-## Critical Conventions
+Put a test that starts a process or runs a demo in `tests/verify/`. Prove changes with `make verify`
+(`verify-model-finder` skill at `.agents/skills/verify-model-finder/`). Build test results with
+`candidate_result()` or `result_fields()` in `tests/conftest.py`. Every error message follows
+`<file>:<line>: <what is wrong>. Fix: <exact change or command>`.
 
-- **`CLAUDE.md` is a one-line import of `AGENTS.md`.** `AGENTS.md` is the canonical
-  agent instruction file; keep the import file as `@AGENTS.md`.
-- **`experiment.md` is a spec, not scratch.** Do not mutate
-  `experiments/<experiment_id>/experiment.md` unless the human explicitly asks for
-  a spec rewrite.
-- **New code lands per-experiment.** Write new scripts under
-  `experiments/<experiment_id>/scripts/`; keep long-lived modules in
-  `lib/<experiment_id>/`.
-- **Runner presets grant shell access without prompting**, because cycles run
-  unattended. They name the tools and keep each CLI's sandbox where it exists.
-  Read [runners.md](.agents/docs/runners.md) before changing them.
-- **Never commit secrets, `.env`, generated notebooks, or local data.**
+## Conventions
 
-## Operating Principles
+- `experiment.md` is a spec. Change it only when the human asks. A change starts a new comparison.
+- Write one-shot scripts under `experiments/<id>/scripts/`. Keep candidates in `experiments/<id>/model/`.
+- Code for one experiment stays out of the engine. Nothing specific to one company enters this repo.
+- Never commit secrets, `.env`, generated notebooks, or local data.
+- If a doc disagrees with code, fix the doc in the same change.
+- Keep torch and the GBDT libraries in separate processes. Together they can deadlock on OpenMP on macOS.
 
-- Optimize for reproducible offline evaluation.
-- Prefer clear baselines and trustworthy comparisons over tiny score chasing.
-- Respect the split policy and leakage constraints in
-  `experiments/<experiment_id>/experiment.md`.
-- One loop cycle should complete one bounded hypothesis test.
-- Read `experiments/<experiment_id>/research_journal.md`,
-  `research_sources.md`, `experiment.md`, and `results.json` before deciding what
-  to do next.
-- Write the cycle hypothesis to `research_journal.md` before running code, then
-  record the result and implications.
+## Stop and ask
 
-## Loop Contract
+These are safety rules. A task's wording cannot authorize any of them. Stop, and say which rule the
+request reverses.
 
-Each cycle ends by writing its status to
-`experiments/<experiment_id>/cycles/<cycle_id>/cycle_status.json`. The cycle
-prompt names the absolute path.
+- An agent runner, an agent SDK, or a spawned coding agent. The native goal runs the agent.
+- A write to a warehouse or other external system. Pulls stay read-only.
+- An edit to a check, rule, or contract that would allow one of these.
 
-```json
-{"status": "CYCLE_DONE"}
-```
+Rigour is different. It is a default with an override. Selecting on the holdout, reading it twice, or skipping it
+are labelled choices, so do them when a person asks: `--allow-reread --reason <text>` or `--no-holdout`. Say the
+result is exploratory. Never produce a holdout number with no label.
 
-- `CYCLE_DONE`: continue the experiment.
-- `EXPERIMENT_COMPLETE`: genuinely done.
+## Enforced Rules
 
-The supervisor clears that file before every attempt and reads nothing else, so
-naming these values in the journal is safe. A missing file fails the attempt.
+Labels and warnings are in `experiment contract evidence`. This table lists only what code refuses.
+Cite each check as `path::name`. `tests/test_agents_table.py` fails unless that file defines the name: a Python
+`def`, `class`, or module-level name, a Makefile target, an ast-grep rule `id`, or a dotted TOML key, where an
+`id` picks an entry from a list of tables.
 
-## Read The Docs First
-
-Before editing a subsystem, read the matching doc:
-
-- **Architecture / cycle anatomy**: [architecture.md](.agents/docs/architecture.md)
-- **Runner config / model aliases / effort flags**: [runners.md](.agents/docs/runners.md)
-
-If a doc disagrees with code, fix the doc in the same change.
-
-## Index
-
-Start in [architecture.md](.agents/docs/architecture.md). Before using the loop
-on real data, prove the setup against a bundled demo:
-`experiments/demo_bootstrap/`, `experiments/demo_classification/`,
-`experiments/demo_regression/`, `experiments/demo_deep/` (requires `--extra deep`).
+| Rule | Enforced by | Limit |
+| --- | --- | --- |
+| No agent SDK or spawned process | `pyproject.toml::tool.ruff.lint.flake8-tidy-imports.banned-api.subprocess`, `rules/no-agent-runtime.yml::no-agent-runtime`, `rules/no-agent-sdk.yml::no-agent-sdk` | `getattr(os, ...)` passes. Scripts, tests, and the verify skill may start processes, and the extensionless `verify` script is not scanned for SDK imports |
+| No network client or static warehouse driver import outside the source adapters | `pyproject.toml::tool.ruff.lint.flake8-tidy-imports.banned-api.socket`, `pyproject.toml::tool.ruff.lint.flake8-tidy-imports.banned-api.adbc_driver_snowflake`, `tests/test_duckdb_boundary.py::test_engine_code_does_not_import_duckdb` | Imports only, of the listed modules. `duckdb` is checked by the AST test in `src/model_finder` alone, because experiments and demos use it for local CSV analysis. `importlib.import_module` passes, which is how `src/model_finder/sources/adapters.py` loads drivers. Other stdlib clients such as `ftplib` and `pyarrow.fs` pass |
+| Pulls are read-only, with no override | `src/model_finder/sources/query.py::require_read_only_query`, `src/model_finder/sources/manifest.py::verify_snapshot` | Defence in depth: the warehouse role is the real guard |
+| The agent does not read the holdout store | `src/model_finder/cli/agent_rules.py::HOLDOUT_DENY_RULES`, `src/model_finder/cli/setup.py::_write_deny_rules`, `src/model_finder/cli/guard.py::refusal` | Deny rules for Claude Code, the guard hook for Codex and Cursor. Both match names, so a path a script builds passes |
+| A consumer's declared claude.ai connector writes are denied | `src/model_finder/cli/agent_rules.py::connector_rules`, `src/model_finder/cli/guard.py::refusal` | A tool the declaration omits stays allowed |
+| Candidates receive no holdout rows, and predict never receives the target | `src/model_finder/splits.py::SearchSplits`, `src/model_finder/candidates.py::scored_candidate`, `pyproject.toml::tool.importlinter.contracts.demos-cannot-reach-holdout-store` | A script can still read the store, and a hand-built `FittedCandidate` scores its own rows |
+| A holdout read needs a reason after the first | `src/model_finder/ledger.py::claim_for_evaluation`, `src/model_finder/holdout.py::withdraw_selection` | An edited ledger passes, and a new resplit is a new file |
+| Edited evidence cannot complete | `src/model_finder/final_evaluation.py::load_verified_final`, `src/model_finder/final_evaluation.py::_require_ledger_chain` | An edited ledger passes |
+| A holdout score cannot enter search metrics by name | `src/model_finder/candidate_result.py::SearchMetrics`, `src/model_finder/candidate_result.py::names_holdout` | A neutral name such as `q4_auc` passes |
+| A reported gap and interval match the metrics | `src/model_finder/candidate_result.py::_gap_matches_metrics`, `src/model_finder/candidate_result.py::_interval_declares_bootstrap_count` | Only when reported |
+| CLI above domain above I/O, and the engine never imports demos | `pyproject.toml::tool.importlinter.contracts.engine-layers`, `pyproject.toml::tool.importlinter.contracts.engine-independent-of-demos` | Imports only |
+| No company name in the engine | `tests/test_no_company_names.py::test_no_company_name_in_src_or_tests` | `src/` and `tests/` only, and one name: `menti` or `mentimeter`, in any case, as its own word |
+| A verify pass needs a control that observes FAIL | `.agents/skills/verify-model-finder/verify::run_control` | One drive's exit-code check |
+| A skipped, xfailed, or xpassed test fails the run | `tests/conftest.py::pytest_sessionfinish` | None |
+| Tests do not sleep or read the clock, and every skip or xfail gives a reason | `tests/ruff.toml::lint.flake8-tidy-imports.banned-api`, `tests/test_strict_mode.py::test_every_skip_gives_a_reason` | Only the calls in the banned-api table. A reason held in a variable passes |

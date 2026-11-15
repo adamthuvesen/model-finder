@@ -1,0 +1,27 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from demos.common import CODE_ROOT
+from demos.demo_bootstrap.data import TARGET_COLUMN, TIME_COLUMN
+from demos.demo_bootstrap.generate_data import generate_demo_bootstrap_dataset
+from demos.demo_bootstrap.modeling import CANDIDATE_RUNNERS
+from model_finder.api import ExperimentSeed, RunnerConfig, run_runner_main
+
+_HERE = Path(__file__).resolve().parent
+
+CONFIG = RunnerConfig(
+    seed=ExperimentSeed(
+        experiment_id="demo_bootstrap",
+        template_path=_HERE / "experiment_template.md",
+    ),
+    candidate_runners=CANDIDATE_RUNNERS,
+    rows_loader=lambda seed: generate_demo_bootstrap_dataset(seed=seed),
+    rows_source=None,
+    time_column=TIME_COLUMN,
+    target_column=TARGET_COLUMN,
+    code_root=CODE_ROOT,
+)
+
+if __name__ == "__main__":
+    raise SystemExit(run_runner_main(CONFIG))

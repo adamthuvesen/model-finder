@@ -1,0 +1,21 @@
+id: no-agent-runtime
+language: python
+severity: error
+message: "The native goal runs the agent, so code must not start one. Fix: remove this dynamic import."
+files:
+  - src/**/*.py
+  - demos/**/*.py
+  - experiments/**/*.py
+rule:
+  any:
+    - pattern: __import__($$$)
+    - all:
+        - kind: call
+        - has:
+            field: function
+            regex: (^|\.)import_module$
+        - has:
+            field: arguments
+            has:
+              kind: string
+              regex: (subprocess|multiprocessing|concurrent|anthropic|openai|claude|pty|asyncio)

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "hooks": {
+    "postToolUse": [
+      {
+        "matcher": "Write",
+        "command": "sh \"$(git rev-parse --show-toplevel)/.agents/hooks/post_edit.sh\" cursor"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "\"$(git rev-parse --show-toplevel)/.venv/bin/python\" -m model_finder.cli.guard cursor \"$(git rev-parse --show-toplevel)\"",
+        "timeout": 10,
+        "failClosed": true
+      }
+    ],
+    "beforeReadFile": [
+      {
+        "command": "\"$(git rev-parse --show-toplevel)/.venv/bin/python\" -m model_finder.cli.guard cursor \"$(git rev-parse --show-toplevel)\"",
+        "timeout": 10,
+        "failClosed": true
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "\"$(git rev-parse --show-toplevel)/.venv/bin/python\" -m model_finder.cli.guard cursor \"$(git rev-parse --show-toplevel)\"",
+        "timeout": 10,
+        "failClosed": true
+      }
+    ]
+  }
+}

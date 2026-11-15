@@ -1,0 +1,8 @@
+id: no-agent-runtime
+valid:
+  - importlib.import_module(module)
+  - import json
+invalid:
+  - __import__("subprocess")
+  - importlib.import_module("anthropic")
+  - importlib.import_module("concurrent.futures")

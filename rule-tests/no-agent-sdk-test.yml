@@ -1,0 +1,11 @@
+id: no-agent-sdk
+valid:
+  - import json
+  - from pathlib import Path
+  - import openapi_spec
+invalid:
+  - import anthropic
+  - import openai.types as types
+  - from claude_agent_sdk import query
+  - from langchain_core.messages import HumanMessage
+  - import langgraph

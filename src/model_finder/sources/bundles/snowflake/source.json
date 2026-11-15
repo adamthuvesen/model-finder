@@ -1,0 +1,35 @@
+{
+  "source_type": "snowflake",
+  "display_name": "Snowflake",
+  "extra": "snowflake",
+  "package": "adbc-driver-snowflake",
+  "driver": "adbc",
+  "time_travel": true,
+  "description": "Snowflake via ADBC; Time Travel AT(TIMESTAMP=>...) for a reproducible as-of.",
+  "read_only_grant": "Dedicated SELECT-only role (Snowflake has no read-only session flag).",
+  "auth_modes": [
+    "externalbrowser SSO (keyless)",
+    "key-pair",
+    "oauth"
+  ],
+  "credentials_via": "--conn key=value flags, browser SSO locally",
+  "adbc_module": "adbc_driver_snowflake.dbapi",
+  "connection_keys": {
+    "account": "adbc.snowflake.sql.account",
+    "user": "username",
+    "username": "username",
+    "password": "password",
+    "database": "adbc.snowflake.sql.db",
+    "schema": "adbc.snowflake.sql.schema",
+    "warehouse": "adbc.snowflake.sql.warehouse",
+    "role": "adbc.snowflake.sql.role",
+    "authenticator": "adbc.snowflake.sql.auth_type"
+  },
+  "connection_values": {
+    "authenticator": {
+      "externalbrowser": "auth_ext_browser",
+      "snowflake": "auth_snowflake",
+      "oauth": "auth_oauth"
+    }
+  }
+}

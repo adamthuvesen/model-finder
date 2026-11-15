@@ -1,0 +1,283 @@
+#!/usr/bin/env python3
+"""Drive the real model-finder CLI offline, one temp HOME per drive. Evidence stays in .verify/runs/."""
+
+from __future__ import annotations
+
+import atexit
+import hashlib
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import UTC, datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from drives import (
+    BIN,
+    CONTROL_FAILURE,
+    CONTROL_REFUSAL,
+    DRIVES,
+    LIVE,
+    ROOT,
+    SHARED,
+    SMOKE,
+    Ctx,
+    DriveFailure,
+    Fixture,
+    check_missing_experiment,
+    git,
+    kill_group,
+)
+
+# The same rule as model_finder.ledger._data_home, so the tripwire watches the store the engine writes.
+_XDG_DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", ""))
+REAL_STORE = (
+    _XDG_DATA_HOME if _XDG_DATA_HOME.is_absolute() else Path.home() / ".local" / "share"
+) / "model-finder"
+REAL_SOURCES = Path.home() / ".config" / "model-finder" / "sources.json"
+TRIPWIRE_TOOLS = ("claude", "codex", "cursor-agent", "modal", "launchctl", "brew", "op")
+
+
+def changed_files() -> set[str]:
+    base = git("merge-base", "HEAD", "origin/main") or git("merge-base", "HEAD", "main") or "HEAD"
+    names = (
+        git("diff", "--name-only", base).splitlines()
+        + git("ls-files", "--others", "--exclude-standard").splitlines()
+    )
+    return {name for name in names if name}
+
+
+def matches(name: str, glob: str) -> bool:
+    """Match a path glob where `*` stays inside one directory and `**` crosses them."""
+    parts = re.split(r"(\*\*|\*)", glob)
+    pattern = "".join({"**": ".*", "*": "[^/]*"}.get(part, re.escape(part)) for part in parts)
+    return re.fullmatch(pattern, name) is not None
+
+
+def select(files: set[str]) -> list[str]:
+    def hits(globs: tuple[str, ...]) -> bool:
+        return any(matches(f, g) for f in files for g in globs)
+
+    if hits(SHARED):
+        return list(DRIVES)
+    return [name for name, drive in DRIVES.items() if hits(drive.paths)] or [SMOKE]
+
+
+def preflight() -> None:
+    problems = []
+    if not (BIN / "experiment").is_file():
+        problems.append(f"{BIN}/experiment is missing. Fix: make setup")
+    else:
+        found = subprocess.run(
+            [str(BIN / "python"), "-c", "import model_finder;print(model_finder.__file__)"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if not found.stdout.strip().startswith(str(ROOT)):
+            problems.append(
+                f"model_finder resolves to {found.stdout.strip() or 'nothing'}, not this checkout. Fix: make setup"
+            )
+    if shutil.which("uv") is None:
+        problems.append("uv is not on PATH. Fix: install uv")
+    if problems:
+        sys.exit("verify: preflight failed: " + "; ".join(problems))
+
+
+def real_state() -> list[str]:
+    listing = (
+        sorted(
+            f"{p.relative_to(REAL_STORE)}:{p.lstat().st_size}:{p.lstat().st_mtime_ns}"
+            for p in REAL_STORE.rglob("*")
+        )
+        if REAL_STORE.is_dir()
+        else []
+    )
+    return [
+        *listing,
+        f"sources.json mtime {REAL_SOURCES.stat().st_mtime if REAL_SOURCES.exists() else None}",
+    ]
+
+
+def file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else "absent"
+
+
+def repo_state() -> dict[str, str]:
+    """HEAD, the branch, git config and hooks, and every changed, untracked, or ignored path.
+
+    Changed and untracked files compare by content. Ignored files compare by size and mtime,
+    because `.venv` holds too many files to hash.
+    """
+    common = (ROOT / git("rev-parse", "--git-common-dir")).resolve()
+    state = {".git/config": file_digest(common / "config")}
+    state |= {f".git/hooks/{hook.name}": file_digest(hook) for hook in (common / "hooks").glob("*")}
+    status = git("status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all", "--ignored")
+    entries = iter(status.split("\0"))
+    for entry in entries:
+        if entry.startswith("# branch."):
+            key, _, value = entry.removeprefix("# ").partition(" ")
+            state[key] = value
+            continue
+        if not entry or entry.startswith("#"):
+            continue
+        kind = entry[0]
+        fields = {"1": 8, "2": 9, "u": 10}.get(kind)
+        path = entry.split(" ", fields)[fields] if fields else entry[2:]
+        if kind == "2":
+            next(entries)
+        if path.startswith(".verify/") or "__pycache__" in path.split("/"):
+            continue
+        target = ROOT / path
+        if kind == "!":
+            info = target.lstat()
+            state[path] = f"ignored:{info.st_size}:{info.st_mtime_ns}"
+        else:
+            state[path] = f"{entry.split(' ', 2)[1] if fields else kind}:{file_digest(target)}"
+    return state
+
+
+def start_ctx(name: str, run_dir: Path, scratch_root: Path) -> Ctx:
+    scratch = Path(tempfile.mkdtemp(prefix=f"{name}-", dir=scratch_root))
+    (scratch / "home/.local/share").mkdir(parents=True)
+    (scratch / "tripwire").mkdir()
+    for tool in TRIPWIRE_TOOLS:
+        stub = scratch / "tripwire" / tool
+        stub.write_text(f'#!/bin/sh\necho "{tool} $*" >> "{scratch}/tripwire.log"\nexit 97\n')
+        stub.chmod(0o755)
+    (run_dir / name).mkdir(parents=True, exist_ok=True)
+    return Ctx(name, scratch, run_dir / name)
+
+
+def run_one(name: str, run_dir: Path, scratch_root: Path) -> dict[str, object]:
+    ctx, started = start_ctx(name, run_dir, scratch_root), time.monotonic()
+    try:
+        result, detail = "PASS", DRIVES[name].run(ctx)
+    except DriveFailure as failure:
+        result, detail = "FAIL", str(failure)
+    except SystemExit as early_exit:
+        result, detail = "FAIL", f"the drive exited the process early (exit {early_exit.code!r})"
+    if (ctx.scratch / "tripwire.log").exists():
+        result, detail = (
+            "FAIL",
+            f"tripwire called: {(ctx.scratch / 'tripwire.log').read_text().strip()}",
+        )
+    return {
+        "drive": name,
+        "result": result,
+        "seconds": round(time.monotonic() - started, 1),
+        "detail": detail,
+    }
+
+
+def run_control(run_dir: Path, scratch_root: Path) -> dict[str, object]:
+    """Re-drive the missing-experiment check expecting exit 0. The control passes only when that check FAILS."""
+    ctx = start_ctx("control", run_dir, scratch_root)
+    try:
+        check_missing_experiment(ctx, code=0)
+    except DriveFailure as failure:
+        message = str(failure)
+        if message.startswith(CONTROL_FAILURE) and CONTROL_REFUSAL in message:
+            return {
+                "drive": "control",
+                "result": "PASS",
+                "seconds": 0,
+                "detail": f"FAIL observed as expected: {message}",
+            }
+        return {
+            "drive": "control",
+            "result": "FAIL",
+            "seconds": 0,
+            "detail": f"failed for another reason; expected {CONTROL_FAILURE!r}: {message}",
+        }
+    return {
+        "drive": "control",
+        "result": "FAIL",
+        "seconds": 0,
+        "detail": "the wrong expectation (exit 0) passed, so the check proves nothing",
+    }
+
+
+def main(argv: list[str]) -> int:
+    command = argv[0] if argv else ""
+    if command == "list":
+        for name, drive in DRIVES.items():
+            print(f"{name:13} {drive.proves}\n{'':13} paths: {', '.join(drive.paths)}")
+        return 0
+    names = {"": select(changed_files()), "all": list(DRIVES), "control": []}.get(command, argv)
+    if unknown := [n for n in names if n not in DRIVES]:
+        print(
+            f"verify: unknown drive {', '.join(unknown)}. Fix: pick from `verify list`",
+            file=sys.stderr,
+        )
+        return 2
+    preflight()
+    sha, dirty = git("rev-parse", "--short=7", "HEAD"), bool(git("status", "--porcelain"))
+    run_dir = (
+        ROOT
+        / ".verify/runs"
+        / f"{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}-{sha}{'-dirty' if dirty else ''}"
+    )
+    run_dir.parent.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir()
+    scratch_root = Path(tempfile.mkdtemp(prefix="verify-model-finder-"))
+    atexit.register(shutil.rmtree, scratch_root, ignore_errors=True)
+    before, checkout, results = real_state(), repo_state(), []
+    Fixture.ctx = start_ctx("fixture", run_dir, scratch_root)
+    with ThreadPoolExecutor(max_workers=max(len(names), 1)) as pool:
+        futures = [pool.submit(run_one, n, run_dir, scratch_root) for n in names]
+        if command == "control":
+            futures = [pool.submit(run_control, run_dir, scratch_root)]
+        for future in as_completed(futures):
+            results.append(future.result())
+            print("{result} {drive} {seconds}s {detail}".format(**results[-1]), flush=True)
+    # run_one reads only its own drive's log, so the shared fixture and the control need this.
+    if hits := sorted(scratch_root.glob("*/tripwire.log")):
+        calls = [
+            f"{log.parent.name}: {call}" for log in hits for call in log.read_text().splitlines()
+        ]
+        detail = "; ".join(calls)
+        results.append({"drive": "tripwire", "result": "FAIL", "seconds": 0, "detail": detail})
+        print(f"FAIL tripwire 0s a stubbed tool was called: {detail}")
+    if real_state() != before:
+        results.append(
+            {
+                "drive": "tripwire",
+                "result": "FAIL",
+                "seconds": 0,
+                "detail": f"{REAL_STORE} or {REAL_SOURCES} changed",
+            }
+        )
+        print("FAIL tripwire 0s the real holdout store or sources.json changed during the run")
+    after = repo_state()
+    if changed := sorted(
+        k for k in checkout.keys() | after.keys() if checkout.get(k) != after.get(k)
+    ):
+        detail = f"the run changed the checkout: {', '.join(changed)}"
+        results.append({"drive": "repo-state", "result": "FAIL", "seconds": 0, "detail": detail})
+        print(f"FAIL repo-state 0s {detail}")
+    (run_dir / "summary.json").write_text(
+        json.dumps({"sha": git("rev-parse", "HEAD"), "dirty": dirty, "drives": results}, indent=1)
+    )
+    print(f"evidence: {run_dir}")
+    return 1 if any(r["result"] != "PASS" for r in results) else 0
+
+
+def stop(signum: int, _frame: object) -> None:
+    for proc in list(LIVE):
+        kill_group(proc)
+    sys.exit(128 + signum)
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, stop)
+    atexit.register(lambda: [kill_group(p) for p in list(LIVE)])
+    sys.exit(main(sys.argv[1:]))
