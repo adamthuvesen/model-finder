@@ -20,7 +20,7 @@ from model_finder.completion import (
     check_completion,
     evidence_file,
 )
-from model_finder.data_audit import OverlapReport
+from model_finder.data_audit import OverlapReport, overlap_report
 from model_finder.final_evaluation import evaluate_final, freeze_candidate
 from model_finder.holdout import (
     consumed_holdout_count,
@@ -552,6 +552,19 @@ def test_duplicate_and_nan_keys(tmp_path: Path, code_root: Path) -> None:
     overlap = _freeze_and_evaluate(path).overlap
     assert overlap.key_columns == ["account"]
     assert overlap.search_holdout_keys == 0
+
+
+def test_overlap_counts_every_holdout_row_that_shares_a_key() -> None:
+    search, holdout = temporal_split(rows(count=100), "when")
+    one_account = SearchSplits(
+        train=search.train.assign(account="acme"),
+        validation=search.validation.assign(account="other"),
+    )
+    report = overlap_report(
+        one_account, HoldoutSplits(holdout=holdout.holdout.assign(account="acme")), ["account"]
+    )
+    assert report.search_holdout_keys == len(holdout.holdout)
+    assert report.is_large
 
 
 def test_swapped_search_rows_fail_completion(scored: Path) -> None:

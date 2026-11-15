@@ -130,12 +130,15 @@ def _comparable(left: pd.Series, right: pd.Series) -> bool:
 
 
 def _shared_rows(left: pd.DataFrame, right: pd.DataFrame, columns: list[str]) -> int | None:
-    """Count distinct left rows found in right, or None when the frames are not comparable."""
+    """Count left rows whose values appear in right, or None when the frames are not comparable.
+
+    Left is not deduplicated, so the count is in left rows and compares with len(left).
+    """
     if any(c not in left.columns or c not in right.columns for c in columns):
         return None
     if not all(_comparable(left[c], right[c]) for c in columns):
         return None
-    return len(left[columns].drop_duplicates().merge(right[columns].drop_duplicates(), on=columns))
+    return len(left[columns].merge(right[columns].drop_duplicates(), on=columns))
 
 
 def _with_keys(rows: pd.DataFrame, key_columns: list[str]) -> pd.DataFrame:
@@ -149,7 +152,7 @@ def overlap_report(
     all_columns = [str(column) for column in search.train.columns]
     counts = {
         "train_validation_exact_rows": _shared_rows(search.train, search.validation, all_columns),
-        "search_holdout_exact_rows": _shared_rows(search_rows, holdout.holdout, all_columns),
+        "search_holdout_exact_rows": _shared_rows(holdout.holdout, search_rows, all_columns),
     }
     if key_columns:
         # A missing key identifies nothing, so NaN keys never count as shared.
@@ -159,8 +162,8 @@ def overlap_report(
             key_columns,
         )
         counts["search_holdout_keys"] = _shared_rows(
-            _with_keys(search_rows, key_columns),
             _with_keys(holdout.holdout, key_columns),
+            _with_keys(search_rows, key_columns),
             key_columns,
         )
     return OverlapReport(
